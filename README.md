@@ -89,6 +89,22 @@ pi --provider local-b70 --model gemma-4-e4b -p "one-shot prompt"
 
 `pi config` opens a TUI for enabling/disabling extensions.
 
+## CLI helper: `llm-swap`
+
+For software that doesn't speak llama-swap's auto-routing (e.g. tools written for LM Studio or cloud APIs that hard-code a model name), use the `bin/llm-swap` helper to preload a model first, then run your tool. llama-swap will keep that model warm until something else asks for a different one.
+
+```bash
+llm-swap qwen3.6-27b   # preload (returns when warm — ~22 s cold, instant if already loaded)
+llm-swap gemma-4-e4b
+llm-swap list          # configured models
+llm-swap status        # currently loaded model
+llm-swap unload        # free VRAM
+```
+
+Symlink it onto PATH: `ln -s ~/Code/intel/bin/llm-swap ~/.local/bin/llm-swap`. Honors `LLAMA_SWAP_URL` (default `http://127.0.0.1:8080`).
+
+Note: llama-swap routes requests by the `model` field in the request body. If your software sends a model name that isn't in the registry (e.g. `gpt-4o`), it will be rejected — preloading doesn't change that. Either configure your software to send `qwen3.6-27b` / `gemma-4-e4b`, or add `aliases:` entries to `llama-swap.yaml`.
+
 ## Adding another model
 
 1. Drop the GGUF under `~/.lmstudio/models/<owner>/<repo>/`.
