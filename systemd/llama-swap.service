@@ -1,0 +1,16 @@
+[Unit]
+Description=llama-swap proxy (hot-swaps llama.cpp models for Intel Arc Pro B70)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jeff/Code/intel
+ExecStart=/home/jeff/Code/intel/bin/llama-swap \
+  --config /home/jeff/Code/intel/llama-swap.yaml \
+  --listen 127.0.0.1:8080
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=60
+
+[Install]
+WantedBy=default.target

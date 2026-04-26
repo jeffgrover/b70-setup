@@ -1,0 +1,33 @@
+healthCheckTimeout: 180
+logLevel: info
+
+models:
+  qwen3.6-27b:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/lmstudio-community/Qwen3.6-27B-GGUF/Qwen3.6-27B-Q4_K_M.gguf
+      -ngl 999
+      -c 262144
+      -ctk q8_0 -ctv q8_0
+      -fa on
+      --parallel 1
+      --host 127.0.0.1 --port 9000
+      --jinja
+      --alias qwen3.6-27b"
+
+  gemma-4-e4b:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/unsloth/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf
+      -ngl 999
+      -c 131072
+      -ctk q8_0 -ctv q8_0
+      -fa on
+      --parallel 1
+      --host 127.0.0.1 --port 9000
+      --jinja
+      --alias gemma-4-e4b"

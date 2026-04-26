@@ -1,0 +1,9 @@
+*.gguf
+*.safetensors
+*.bin
+ov_venv/
+ov_env/
+ov_cache/
+__pycache__/
+*.log
+.DS_Store
