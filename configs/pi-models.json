@@ -1,0 +1,20 @@
+{
+  "providers": {
+    "local-b70": {
+      "api": "openai-completions",
+      "baseUrl": "http://127.0.0.1:8080/v1",
+      "apiKey": "sk-local",
+      "authHeader": true,
+      "models": [
+        {
+          "id": "qwen3.6-27b",
+          "name": "Qwen3.6-27B (B70 SYCL, 256K ctx)"
+        },
+        {
+          "id": "gemma-4-e4b",
+          "name": "Gemma-4 E4B (B70 SYCL)"
+        }
+      ]
+    }
+  }
+}

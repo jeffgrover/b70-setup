@@ -13,6 +13,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.DS_Store
 
 models/
 *.gguf
@@ -20,3 +21,7 @@ models/
 *.bin
 *.pt
 *.pth
+
+ov_venv/
+ov_env/
+ov_cache/
