@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+# llm-swap — preload / inspect / unload models in llama-swap.
+#
+# Usage:
+#   llm-swap <model>     preload <model> (warms it; subsequent requests are fast)
+#   llm-swap list        list configured models
+#   llm-swap status      show currently running model
+#   llm-swap unload      unload current model (frees VRAM)
+#   llm-swap configure   configure Pi agent and opencode for llama-swap
+#
+# Env: LLAMA_SWAP_URL (default http://127.0.0.1:8080)
+#      PI_AGENT_CONFIG (default ~/.pi/agent/models.json)
+#      PI_AGENT_AUTH (default ~/.pi/agent/auth.json)
+#      OPENCODE_CONFIG (default ~/.config/opencode/opencode.json)
+#      LLAMA_SWAP_CONFIG (default ../llama-swap.yaml next to this script)
+set -euo pipefail
+
+ENDPOINT="${LLAMA_SWAP_URL:-http://127.0.0.1:8080}"
+PROVIDER_ID="local-b70"
+PROVIDER_NAME="Local B70 (Intel Arc Pro, llama-swap)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LLAMA_SWAP_CONFIG="${LLAMA_SWAP_CONFIG:-$SCRIPT_DIR/../llama-swap.yaml}"
+PI_AGENT_CONFIG="${PI_AGENT_CONFIG:-$HOME/.pi/agent/models.json}"
+PI_AGENT_AUTH="${PI_AGENT_AUTH:-$HOME/.pi/agent/auth.json}"
+OPENCODE_CONFIG="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.json}"
+
+provider_base_url() {
+  local base="${ENDPOINT%/}"
+  base="${base%/v1}"
+  printf '%s/v1' "$base"
+}
+
+usage() {
+  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit 1
+}
+
+configure_clients() {
+  command -v python3 >/dev/null || {
+    echo "python3 is required for configure." >&2
+    exit 1
+  }
+
+  local models_json
+  models_json=$(curl -sS "$ENDPOINT/v1/models" | jq -c '[.data[].id]')
+  if [ "$models_json" = "[]" ]; then
+    echo "No models returned by $ENDPOINT/v1/models" >&2
+    exit 2
+  fi
+
+  MODELS_JSON="$models_json" \
+  BASE_URL="$(provider_base_url)" \
+  PROVIDER_ID="$PROVIDER_ID" \
+  PROVIDER_NAME="$PROVIDER_NAME" \
+  LLAMA_SWAP_CONFIG="$LLAMA_SWAP_CONFIG" \
+  PI_AGENT_CONFIG="$PI_AGENT_CONFIG" \
+  PI_AGENT_AUTH="$PI_AGENT_AUTH" \
+  OPENCODE_CONFIG="$OPENCODE_CONFIG" \
+  python3 - <<'PY'
+import json
+import os
+import re
+import shlex
+import tempfile
+from pathlib import Path
+
+models = json.loads(os.environ["MODELS_JSON"])
+base_url = os.environ["BASE_URL"]
+provider_id = os.environ["PROVIDER_ID"]
+provider_name = os.environ["PROVIDER_NAME"]
+swap_config = Path(os.environ["LLAMA_SWAP_CONFIG"]).expanduser()
+pi_config = Path(os.environ["PI_AGENT_CONFIG"]).expanduser()
+pi_auth = Path(os.environ["PI_AGENT_AUTH"]).expanduser()
+opencode_config = Path(os.environ["OPENCODE_CONFIG"]).expanduser()
+
+
+def read_json(path, default):
+    if not path.exists():
+        return default
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_json_if_changed(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rendered = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    if path.exists() and path.read_text(encoding="utf-8") == rendered:
+        return False
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as f:
+        f.write(rendered)
+        tmp = Path(f.name)
+    tmp.replace(path)
+    return True
+
+
+def load_swap_contexts():
+    if not swap_config.exists():
+        return {}
+
+    try:
+        import yaml
+    except ImportError:
+        return {}
+
+    with swap_config.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    contexts = {}
+    for model_id, spec in (data.get("models") or {}).items():
+        cmd = spec.get("cmd", "") if isinstance(spec, dict) else ""
+        try:
+            parts = shlex.split(cmd)
+        except ValueError:
+            parts = cmd.split()
+
+        if len(parts) >= 3 and parts[0] == "bash" and parts[1] == "-c":
+            try:
+                parts = shlex.split(parts[2])
+            except ValueError:
+                parts = parts[2].split()
+
+        for idx, part in enumerate(parts[:-1]):
+            if part == "-c" or part == "--ctx-size":
+                try:
+                    contexts[model_id] = int(parts[idx + 1])
+                except ValueError:
+                    pass
+                break
+            if part.startswith("--ctx-size="):
+                try:
+                    contexts[model_id] = int(part.split("=", 1)[1])
+                except ValueError:
+                    pass
+                break
+    return contexts
+
+
+def display_name(model_id):
+    name = re.sub(r"[-_]+", " ", model_id).strip()
+    return name[:1].upper() + name[1:] if name else model_id
+
+
+swap_contexts = load_swap_contexts()
+
+
+def model_limit(model_id):
+    return {"context": swap_contexts.get(model_id, 131072), "output": 8192}
+
+
+def update_pi():
+    data = read_json(pi_config, {"providers": {}})
+    data.setdefault("providers", {})
+    old_models = {
+        item.get("id"): item
+        for item in data.get("providers", {}).get(provider_id, {}).get("models", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    data["providers"][provider_id] = {
+        "baseUrl": base_url,
+        "api": "openai-completions",
+        "apiKey": "sk-local",
+        "compat": {
+            "supportsDeveloperRole": False,
+            "supportsReasoningEffort": False,
+        },
+        "models": [old_models.get(model_id, {"id": model_id}) for model_id in models],
+    }
+    changed = write_json_if_changed(pi_config, data)
+
+    auth = read_json(pi_auth, {})
+    auth[provider_id] = {"type": "api_key", "key": "sk-local"}
+    auth_changed = write_json_if_changed(pi_auth, auth)
+    return changed or auth_changed
+
+
+def update_opencode():
+    data = read_json(opencode_config, {"$schema": "https://opencode.ai/config.json"})
+    data.setdefault("$schema", "https://opencode.ai/config.json")
+    data.setdefault("provider", {})
+    old_models = data.get("provider", {}).get(provider_id, {}).get("models", {})
+    if not isinstance(old_models, dict):
+        old_models = {}
+
+    provider_models = {}
+    for model_id in models:
+        existing = old_models.get(model_id, {})
+        if not isinstance(existing, dict):
+            existing = {}
+        provider_models[model_id] = {
+            "name": existing.get("name", display_name(model_id)),
+            "limit": model_limit(model_id),
+        }
+
+    data["provider"][provider_id] = {
+        "npm": "@ai-sdk/openai-compatible",
+        "name": provider_name,
+        "options": {
+            "baseURL": base_url,
+            "apiKey": "sk-local",
+        },
+        "models": provider_models,
+    }
+    return write_json_if_changed(opencode_config, data)
+
+
+pi_changed = update_pi()
+opencode_changed = update_opencode()
+
+print(f"{'Updated' if pi_changed else 'OK'}: {pi_config}")
+print(f"{'Updated' if opencode_changed else 'OK'}: {opencode_config}")
+print(f"Configured {provider_id} with {len(models)} models: {', '.join(models)}")
+PY
+}
+
+[ $# -eq 1 ] || usage
+
+case "$1" in
+  -h|--help|help) usage ;;
+  configure)
+    configure_clients
+    ;;
+  list)
+    curl -sS "$ENDPOINT/v1/models" | jq -r '.data[].id'
+    ;;
+  status)
+    running=$(curl -sS "$ENDPOINT/running" | jq -r '.running[0].model // empty')
+    if [ -z "$running" ]; then
+      echo "(no model loaded)"
+    else
+      echo "$running"
+    fi
+    ;;
+  unload)
+    curl -sS "$ENDPOINT/unload" >/dev/null
+    echo "Unloaded." >&2
+    ;;
+  *)
+    model="$1"
+    if ! curl -sS "$ENDPOINT/v1/models" | jq -e --arg m "$model" '.data[] | select(.id==$m)' >/dev/null; then
+      echo "Unknown model: $model" >&2
+      echo "Configured models:" >&2
+      curl -sS "$ENDPOINT/v1/models" | jq -r '.data[].id' | sed 's/^/  /' >&2
+      exit 2
+    fi
+    echo "Preloading $model..." >&2
+    start=$(date +%s)
+    curl -sS -X POST "$ENDPOINT/v1/chat/completions" \
+      -H "Content-Type: application/json" \
+      -d "$(jq -nc --arg m "$model" '{model:$m, messages:[{role:"user",content:"hi"}], max_tokens:1, stream:false}')" \
+      >/dev/null
+    echo "Ready in $(( $(date +%s) - start ))s." >&2
+    ;;
+esac
