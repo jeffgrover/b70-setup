@@ -16,7 +16,7 @@ Single-port OpenAI-compatible chat-completions endpoint at `http://127.0.0.1:808
 
 ```
 opencode / pi
-      ↓  POST /v1/chat/completions  { "model": "qwen3.6-27b" | "qwen3.6-35b-a3b" | "nemotron-3-nano-omni" | "gemma-4-e4b" | "gemma-4-31b-qat" | "glm-4.7-flash" }
+      ↓  POST /v1/chat/completions  { "model": "qwen3.6-27b" | "qwen3.6-35b-a3b" | "agents-a1" | "nemotron-3-nano-omni" | "gemma-4-e4b" | "gemma-4-31b-qat" | "glm-4.7-flash" }
 http://127.0.0.1:8080
   llama-swap                          ← model registry: ~/Code/intel/llama-swap.yaml
       ↓  spawns/kills based on requested model
@@ -34,6 +34,7 @@ Only one llama-server runs at a time. First request to a different model trigger
 | `qwen3.6-27b` | `~/.lmstudio/models/lmstudio-community/Qwen3.6-27B-GGUF/Qwen3.6-27B-Q4_K_M.gguf` | Q4_K_M | 128 K (f16 KV) | ~26 GB |
 | `qwen3.6-27b-mtp` | `~/.lmstudio/models/unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-Q4_K_S.gguf` | Q4_K_S + MTP | 128 K (q8_0 KV) | ~20 GB |
 | `qwen3.6-35b-a3b` | `~/.lmstudio/models/lmstudio-community/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-Q4_K_M.gguf` | Q4_K_M | 256 K (q8_0 KV) | ~21.6 GiB |
+| `agents-a1` | `~/.lmstudio/models/InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~25.1 GiB |
 | `nemotron-3-nano-omni` | `~/.lmstudio/models/lmstudio-community/nemotron-3-nano-omni-30b-a3b-reasoning-gguf/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~23.7 GiB |
 | `gemma-4-e4b` | `~/.lmstudio/models/unsloth/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf` | Q4_K_M | 128 K (q8_0 KV) | ~6 GB |
 | `gemma-4-31b-qat` | `~/.lmstudio/models/lmstudio-community/gemma-4-31B-it-QAT-GGUF/gemma-4-31B-it-QAT-Q4_0.gguf` | Q4_0 QAT | 128 K (q8_0 KV) | ~20 GB |
@@ -48,10 +49,18 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 | Qwen3.6-27B Q4_K_M | 292 t/s | 21.6 t/s |
 | Qwen3.6-27B MTP Q4_K_S | 340.9 t/s baseline | 21.9 t/s configured MTP (`--spec-draft-n-max 1`) |
 | Qwen3.6-35B-A3B Q4_K_M | 534.0 t/s short prompt; 503.3 t/s at 4K prompt | 37.2 t/s with q8 KV; 40.1 t/s with f16 KV |
+| Agents-A1 Q4_K_M | 277.8 t/s at 32 tokens | 86.6 t/s bench; 81.6 t/s sustained server decode |
 | Nemotron-3 Nano Omni 30B-A3B Q4_K_M | 483.1 t/s short prompt; 484.2 t/s at 4K prompt | 23.1 t/s with f16 KV; 22.6 t/s with q8 KV |
 | Gemma-4 E4B Q4_K_M | 1710 t/s | 76.5 t/s |
 | Gemma-4 31B QAT Q4_0 | 283.8 t/s | 10.9 t/s |
 | GLM-4.7-Flash Q4_K_M | 496.2 t/s | 20.4 t/s |
+
+### Choosing a model
+
+- Prefer `agents-a1` for substantial coding, research, and tool-driven work. It combines 35B-class capacity, verified native tool use, a 256K context, and about 81.6 t/s sustained generation on this machine. It can spend many tokens reasoning, so simple tasks may take longer than its raw token rate suggests.
+- Use `gemma-4-e4b` for quick questions, summaries, transformations, and routine edits. Its small VRAM footprint, 1710 t/s prompt processing, and 76.5 t/s generation make it the fast path when the task does not need a larger model.
+- Use `qwen3.6-35b-a3b` as the balanced fallback when Agents-A1 overthinks or a less agent-specialized response is preferable.
+- Keep `glm-4.7-flash` as an independent second opinion. The remaining dense, multimodal, and MTP profiles are useful specialty or comparison choices, but their current local throughput makes them less attractive as defaults.
 
 The measured models hit ~75 % of the B70's GDDR6 bandwidth ceiling. Token-gen rate degrades as the context fills (more KV state to attend per step). Don't expect more without quantizing the model further or using a smaller one — the bottleneck is VRAM bandwidth, not compute.
 
@@ -65,6 +74,15 @@ Qwen3.6-35B-A3B tuning notes:
 - The 262K q8 KV profile loads successfully and leaves about 8.7 GiB free on the B70.
 - f16 KV is slightly faster in short generation tests (`40.1 t/s` vs `37.2 t/s`) but uses more KV memory. The `llama-swap` profile uses q8 KV to preserve maximum context for coding-agent runs.
 - Flash attention is required for the tested profile; `-fa off` failed context creation during tuning.
+
+Agents-A1 tuning and usage notes:
+
+- [Agents-A1](https://internscience.github.io/Agents-A1/) is a Qwen3.5-architecture 35B-A3B hybrid MoE trained for long-horizon tool use. Its full 35B weight set must still reside in memory even though roughly 3B parameters are active per token. The 262K f16 KV profile uses about 25.1 GiB of VRAM on the B70, leaving roughly 6.9 GiB free.
+- The default profile keeps thinking enabled and separates it into the OpenAI-compatible `reasoning_content` field. Do not give this model tiny output limits: a trivial arithmetic smoke test consumed 278 completion tokens before producing its three-character final answer. The reported 45K-token training trajectories span reasoning, tool calls, observations, and multiple turns; they do not imply that each response should be a 45K-token monologue.
+- The model authors recommend `temperature=0.85`, `top_p=0.95`, `top_k=20`, `min_p=0`, `presence_penalty=1.1`, and `repetition_penalty=1.0`. These are the server defaults for this profile, but request parameters from clients can override them.
+- Keep the embedded Jinja template. It supplies the Qwen3-Coder XML tool format, supports parallel calls, and preserves tool observations across turns. Local smoke tests verified parsed `tool_calls`, `reasoning_content`, and a complete call → tool response → final answer round trip.
+- The official Q4_K_M GGUF has no MTP/NextN tensors, so this profile deliberately does not enable speculative MTP. The optional 899 MB `Agents-A1-mmproj.gguf` was not downloaded and is not attached; the alias is text-only. Add a separate multimodal alias with `--mmproj` if vision is needed later.
+- Use the native 262K context without RoPE scaling. Keep `--parallel 1` and flash attention. Controlled generation measured `80.51 t/s` with q8 KV and `86.56 t/s` with f16 KV; a matching 1,024-token server decode improved from `75.46` to `81.58 t/s` (+8.1%). The f16 profile also held the compute engine near 100% busy at 2.8 GHz, so higher polling and experimental SYCL graphs are not enabled.
 
 Nemotron tuning notes:
 
@@ -184,11 +202,13 @@ Config: `~/.config/opencode/opencode.json` — provider `local-b70`, default mod
 ```bash
 opencode                                     # interactive TUI, default model
 opencode -m local-b70/qwen3.6-35b-a3b        # interactive TUI, large Qwen MoE
+opencode -m local-b70/agents-a1               # interactive TUI, long-horizon agent model
 opencode -m local-b70/nemotron-3-nano-omni   # interactive TUI, Nemotron hybrid MoE/SSM
 opencode -m local-b70/gemma-4-e4b            # interactive TUI, gemma
 opencode -m local-b70/glm-4.7-flash          # interactive TUI, GLM
 opencode run "summarize this file" @file.py  # one-shot, default model
 opencode run -m local-b70/qwen3.6-35b-a3b "..." # one-shot, large Qwen MoE
+opencode run -m local-b70/agents-a1 "..."    # one-shot, long-horizon agent model
 opencode run -m local-b70/nemotron-3-nano-omni "..." # one-shot, Nemotron
 opencode run -m local-b70/gemma-4-e4b "..."  # one-shot, gemma
 opencode run -m local-b70/glm-4.7-flash "..." # one-shot, GLM
@@ -203,6 +223,7 @@ Config: `~/.pi/agent/models.json` — provider `local-b70`, all active llama-swa
 ```bash
 pi --provider local-b70 --model qwen3.6-27b
 pi --provider local-b70 --model qwen3.6-35b-a3b
+pi --provider local-b70 --model agents-a1
 pi --provider local-b70 --model nemotron-3-nano-omni
 pi --provider local-b70 --model gemma-4-e4b -p "one-shot prompt"
 pi --provider local-b70 --model glm-4.7-flash -p "one-shot prompt"
