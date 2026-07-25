@@ -10,7 +10,7 @@ Single-port OpenAI-compatible chat-completions endpoint at `http://127.0.0.1:808
 | GPU | Intel Arc Pro B70 (Battlemage, 32 GB VRAM, device id `0xe223`) |
 | Connection | USB4 → eGPU enclosure |
 | OS | Ubuntu 26.04 LTS "resolute", kernel 7.0.0-x, `xe` driver |
-| Compute runtime | Intel oneAPI compiler/MKL/oneDNN 2026.0, Level-Zero/OpenCL packages `26.05.37020.3-1` |
+| Compute runtime | Intel oneAPI compiler/MKL 2026.1, oneDNN 2026.0, Level-Zero/OpenCL packages `26.05.37020.3-1` |
 
 ## Architecture
 
@@ -31,7 +31,7 @@ Only one llama-server runs at a time. First request to a different model trigger
 
 | Model | Path | Quant | Context | VRAM |
 |---|---|---|---|---|
-| `qwen3.6-27b` | `~/.lmstudio/models/lmstudio-community/Qwen3.6-27B-GGUF/Qwen3.6-27B-Q4_K_M.gguf` | Q4_K_M | 128 K (q8_0 KV) | ~25 GB |
+| `qwen3.6-27b` | `~/.lmstudio/models/lmstudio-community/Qwen3.6-27B-GGUF/Qwen3.6-27B-Q4_K_M.gguf` | Q4_K_M | 128 K (f16 KV) | ~26 GB |
 | `qwen3.6-27b-mtp` | `~/.lmstudio/models/unsloth/Qwen3.6-27B-MTP-GGUF/Qwen3.6-27B-Q4_K_S.gguf` | Q4_K_S + MTP | 128 K (q8_0 KV) | ~20 GB |
 | `qwen3.6-35b-a3b` | `~/.lmstudio/models/lmstudio-community/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-Q4_K_M.gguf` | Q4_K_M | 256 K (q8_0 KV) | ~21.6 GiB |
 | `nemotron-3-nano-omni` | `~/.lmstudio/models/lmstudio-community/nemotron-3-nano-omni-30b-a3b-reasoning-gguf/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~23.7 GiB |
@@ -55,6 +55,11 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 
 The measured models hit ~75 % of the B70's GDDR6 bandwidth ceiling. Token-gen rate degrades as the context fills (more KV state to attend per step). Don't expect more without quantizing the model further or using a smaller one — the bottleneck is VRAM bandwidth, not compute.
 
+Qwen3.6-27B tuning notes:
+
+- The 131K f16 KV profile loads successfully on the B70. It uses roughly 1 GiB more VRAM than q8 KV because only 16 of the model's 64 layers use full-attention KV.
+- f16 KV enables the Battlemage oneDNN/XMX flash-attention path. In controlled `llama-bench` tests, 512-token prompt processing improved from `701.07 t/s` with q8 KV to `794.83 t/s` with f16 KV, while 128-token generation improved from `23.62 t/s` to `24.16 t/s`.
+
 Qwen3.6-35B-A3B tuning notes:
 
 - The 262K q8 KV profile loads successfully and leaves about 8.7 GiB free on the B70.
@@ -72,9 +77,18 @@ For comparison, LM Studio's bundled Vulkan llama.cpp gets ~9 t/s on the same Qwe
 
 ## llama.cpp update notes
 
-Current local build: `4fc4ec554` (`b9859`), built with IntelLLVM 2026.0.0.
+Current local build: `720d7fa40` (`b10121-4-g720d7fa40`), built with IntelLLVM 2026.1.0.
 
-This update matters for Intel Arc because upstream llama.cpp added SYCL reorder optimizations for `Q4_K`, `Q5_K`, `Q6_K`, and `Q8_0` in April-May 2026. The `Q8_0` change was merged as PR `#21527` and reported a Qwen3.5-27B Arc Pro B70 token-generation improvement from 4.88 t/s to 15.24 t/s. The current checkout contains that code path (`ggml/src/ggml-sycl/quants.hpp`, `dmmv.cpp`, `mmvq.cpp`, `vecdotq.hpp`).
+### Maintenance record: 2026-07-25
+
+- Fast-forwarded the local llama.cpp checkout from `4fc4ec554` (`b9859`) to `720d7fa40` (`b10121-4-g720d7fa40`) and rebuilt `llama-server` and `llama-bench` against the refreshed Intel oneAPI stack.
+- Installed the Level Zero development package and rebuilt with direct Level Zero allocation, oneDNN, FP16 kernels, SYCL graph support, and host-memory fallback compiled in. Runtime graph capture remains disabled by its upstream default.
+- Rebuilt and embedded the llama.cpp web UI, then verified the llama-swap dashboard on port 8080 and the transient llama.cpp UI/API on port 9000.
+- Changed the standard Qwen3.6-27B profile to f16 KV at its existing 131K context, enabling the Battlemage oneDNN/XMX flash-attention path without changing or redownloading its Q4_K_M GGUF.
+- Benchmarked the optional DMMV preference and left it disabled: it reduced Qwen3.6-27B generation from `23.62 t/s` to `18.04 t/s`.
+- Updated `llm-swap configure` so Pi and opencode receive model context and output limits derived from each profile's `-c` value.
+
+This update matters for Intel Arc because upstream llama.cpp now includes oneDNN/XMX flash attention, Battlemage flash-attention tuning, fused top-k MoE dispatch, `Q2_K` reorder support, and several SYCL quantization and copy correctness fixes. It also retains the earlier reorder optimizations for `Q4_K`, `Q5_K`, `Q6_K`, and `Q8_0`.
 
 Rebuild command used here:
 
@@ -84,7 +98,9 @@ git fetch --tags origin master
 git checkout master
 git pull --ff-only origin master
 source /opt/intel/oneapi/setvars.sh > /dev/null
-cmake -S . -B build \
+cmake --fresh -S . -B build \
+  -DCMAKE_C_COMPILER=icx \
+  -DCMAKE_CXX_COMPILER=icpx \
   -DGGML_SYCL=ON \
   -DGGML_SYCL_TARGET=INTEL \
   -DGGML_SYCL_DNN=ON \
@@ -97,10 +113,10 @@ cmake --build build --config Release --target llama-server llama-bench -j 6
 
 Notes from the rebuild:
 
-- `GGML_SYCL_F16=ON` is now enabled. Upstream recommends testing both modes because FP16 can improve prompt processing depending on the model.
-- CMake warned that Level Zero headers/loader were not found, so Level Zero compile-time support detection was disabled. Runtime startup still works when launched through `source /opt/intel/oneapi/setvars.sh`.
-- The embedded llama.cpp web UI assets could not be fetched in the sandbox, so `llama-server` was built without embedded UI assets. This does not affect the OpenAI-compatible API used by `llama-swap`.
-- `llama-server --version` succeeds outside the sandbox with oneAPI initialized. Inside the sandbox, Intel SYCL cannot see the preferred GPU platform.
+- Ubuntu package `libze-dev` is installed, so CMake enables `GGML_SYCL_SUPPORT_LEVEL_ZERO_API` and links the direct Level Zero allocation path.
+- `GGML_SYCL_F16=ON` remains enabled. Upstream recommends testing both modes because FP16 can improve prompt processing depending on the model.
+- The embedded llama.cpp web UI was built from the checked-out sources with npm and linked as gzip-compressed assets. The initial UI dependency install requires network access.
+- Host validation reports `SYCL0: Intel(R) Graphics [0xe223]` with 31023 MiB and `llama-server --version` reports IntelLLVM 2026.1.0.
 
 ### MTP speculative decoding
 
@@ -140,6 +156,26 @@ sudo loginctl enable-linger jeff
 ```
 
 The service runs as a user unit (no system root needed). Without `enable-linger`, it stops when you log out.
+
+## Web interfaces and status
+
+| Interface | URL | Availability | Purpose |
+|---|---|---|---|
+| llama-swap dashboard | `http://127.0.0.1:8080/ui/` | While `llama-swap.service` is active | Always-available Models, Activity, and Logs views |
+| Embedded llama.cpp UI | `http://127.0.0.1:9000/` | Only while a model is loaded | Chat, connection and model status, context usage, live prompt progress, generation speed, and per-message token statistics |
+
+Opening `http://127.0.0.1:8080/` redirects to the llama-swap dashboard. The embedded llama.cpp UI is served by the transient `llama-server` child; port 9000 disappears when the model is swapped or unloaded after its 600-second idle TTL.
+
+Status endpoints:
+
+| Endpoint | Availability | Contents |
+|---|---|---|
+| `http://127.0.0.1:8080/health` | While `llama-swap.service` is active | Proxy health |
+| `http://127.0.0.1:9000/health` | While a model is loaded | llama-server health |
+| `http://127.0.0.1:9000/slots` | While a model is loaded | Per-slot state, processed tokens, and timings |
+| `http://127.0.0.1:9000/metrics` | While a model is loaded | Prometheus-format request, token, prompt, and cache metrics (`--metrics` is enabled in each model profile) |
+
+These interfaces do not provide Intel GPU utilization, temperature, power, or complete VRAM telemetry. Use the installed `intel_gpu_top` for hardware monitoring; `xpu-smi` is another option if installed separately.
 
 ## Using opencode
 
@@ -186,11 +222,11 @@ It updates:
 
 | | |
 |---|---|
-| Pi agent models | `~/.pi/agent/models.json` |
+| Pi agent models and per-model context/output limits | `~/.pi/agent/models.json` |
 | Pi agent auth | `~/.pi/agent/auth.json` |
-| opencode provider | `~/.config/opencode/opencode.json` |
+| opencode provider and per-model context/output limits | `~/.config/opencode/opencode.json` |
 
-Run it after adding, renaming, or removing a model in `llama-swap.yaml`.
+For both clients, context and maximum-output limits are set from each model profile's `-c` or `--ctx-size` value. Existing Pi model fields are preserved. Run the command after adding, renaming, removing, or changing the context size of a model in `llama-swap.yaml`.
 
 ## Adding another model
 

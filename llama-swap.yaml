@@ -10,7 +10,7 @@ models:
       -m /home/jeff/.lmstudio/models/lmstudio-community/Qwen3.6-27B-GGUF/Qwen3.6-27B-Q4_K_M.gguf
       -ngl 999
       -c 131072
-      -ctk q8_0 -ctv q8_0
+      -ctk f16 -ctv f16
       -fa on
       --parallel 1
       --metrics

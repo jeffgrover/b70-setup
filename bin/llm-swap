@@ -144,7 +144,17 @@ swap_contexts = load_swap_contexts()
 
 
 def model_limit(model_id):
-    return {"context": swap_contexts.get(model_id, 131072), "output": 8192}
+    context = swap_contexts.get(model_id, 131072)
+    return {"context": context, "output": context}
+
+
+def pi_model_config(model_id):
+    limit = model_limit(model_id)
+    return {
+        "id": model_id,
+        "contextWindow": limit["context"],
+        "maxTokens": limit["output"],
+    }
 
 
 def update_pi():
@@ -163,7 +173,13 @@ def update_pi():
             "supportsDeveloperRole": False,
             "supportsReasoningEffort": False,
         },
-        "models": [old_models.get(model_id, {"id": model_id}) for model_id in models],
+        "models": [
+            {
+                **old_models.get(model_id, {}),
+                **pi_model_config(model_id),
+            }
+            for model_id in models
+        ],
     }
     changed = write_json_if_changed(pi_config, data)
 
