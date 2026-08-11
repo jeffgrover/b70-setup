@@ -1,18 +1,63 @@
 {
   "providers": {
     "local-b70": {
-      "api": "openai-completions",
       "baseUrl": "http://127.0.0.1:8080/v1",
+      "api": "openai-completions",
       "apiKey": "sk-local",
-      "authHeader": true,
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
       "models": [
         {
-          "id": "qwen3.6-27b",
-          "name": "Qwen3.6-27B (B70 SYCL, 256K ctx)"
+          "id": "qwen3.6-35b-a3b",
+          "name": "Qwen3.6-35B-A3B UD-Q4_K_S (256K, vision)",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": true,
+            "supportsReasoningEffort": false
+          },
+          "contextWindow": 262144,
+          "maxTokens": 262144
+        },
+        {
+          "id": "agents-a1",
+          "name": "Agents-A1 Q4_K_M (256K)",
+          "contextWindow": 262144,
+          "maxTokens": 262144
+        },
+        {
+          "id": "muse-glimmer-30b",
+          "name": "Muse Glimmer 30B K-Quant (128K, vision)",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "contextWindow": 131072,
+          "maxTokens": 131072
         },
         {
           "id": "gemma-4-e4b",
-          "name": "Gemma-4 E4B (B70 SYCL)"
+          "name": "Gemma-4 E4B Q4_K_M (128K)",
+          "contextWindow": 131072,
+          "maxTokens": 131072
+        },
+        {
+          "id": "gemma-4-31b-qat",
+          "name": "Gemma-4 31B QAT Q4_0 (128K)",
+          "contextWindow": 131072,
+          "maxTokens": 131072
+        },
+        {
+          "id": "glm-4.7-flash",
+          "name": "GLM-4.7-Flash Q4_K_M (128K)",
+          "contextWindow": 131072,
+          "maxTokens": 131072
         }
       ]
     }

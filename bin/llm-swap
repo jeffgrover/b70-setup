@@ -73,6 +73,31 @@ pi_config = Path(os.environ["PI_AGENT_CONFIG"]).expanduser()
 pi_auth = Path(os.environ["PI_AGENT_AUTH"]).expanduser()
 opencode_config = Path(os.environ["OPENCODE_CONFIG"]).expanduser()
 
+retired_model_ids = {
+    "qwen3.6-27b",
+    "qwen3.6-27b-mtp",
+    "nemotron-3-nano-omni",
+    "qwen/qwen3.6-27b",
+    "qwen/qwen3.6-27b-mtp",
+}
+
+model_metadata = {
+    "qwen3.6-35b-a3b": {
+        "name": "Qwen3.6-35B-A3B UD-Q4_K_S (256K, vision)",
+        "reasoning": True,
+        "input": ["text", "image"],
+        "compat": {
+            "supportsDeveloperRole": True,
+            "supportsReasoningEffort": False,
+        },
+    },
+    "muse-glimmer-30b": {
+        "name": "Muse Glimmer 30B K-Quant (128K, vision)",
+        "reasoning": True,
+        "input": ["text", "image"],
+    },
+}
+
 
 def read_json(path, default):
     if not path.exists():
@@ -150,16 +175,33 @@ def model_limit(model_id):
 
 def pi_model_config(model_id):
     limit = model_limit(model_id)
-    return {
+    config = {
         "id": model_id,
         "contextWindow": limit["context"],
         "maxTokens": limit["output"],
     }
+    metadata = model_metadata.get(model_id, {})
+    for key in ("name", "reasoning", "input", "compat"):
+        if key in metadata:
+            config[key] = metadata[key]
+    return config
+
+
+def purge_retired_pi_models(data):
+    for provider in data.get("providers", {}).values():
+        provider_models = provider.get("models") if isinstance(provider, dict) else None
+        if isinstance(provider_models, list):
+            provider["models"] = [
+                model
+                for model in provider_models
+                if not isinstance(model, dict) or model.get("id") not in retired_model_ids
+            ]
 
 
 def update_pi():
     data = read_json(pi_config, {"providers": {}})
     data.setdefault("providers", {})
+    purge_retired_pi_models(data)
     old_models = {
         item.get("id"): item
         for item in data.get("providers", {}).get(provider_id, {}).get("models", [])
@@ -193,6 +235,13 @@ def update_opencode():
     data = read_json(opencode_config, {"$schema": "https://opencode.ai/config.json"})
     data.setdefault("$schema", "https://opencode.ai/config.json")
     data.setdefault("provider", {})
+
+    for provider in data["provider"].values():
+        provider_models = provider.get("models") if isinstance(provider, dict) else None
+        if isinstance(provider_models, dict):
+            for retired_model_id in retired_model_ids:
+                provider_models.pop(retired_model_id, None)
+
     old_models = data.get("provider", {}).get(provider_id, {}).get("models", {})
     if not isinstance(old_models, dict):
         old_models = {}
@@ -202,10 +251,32 @@ def update_opencode():
         existing = old_models.get(model_id, {})
         if not isinstance(existing, dict):
             existing = {}
-        provider_models[model_id] = {
-            "name": existing.get("name", display_name(model_id)),
+        metadata = model_metadata.get(model_id, {})
+        model_config = {
+            **existing,
+            "name": metadata.get("name", existing.get("name", display_name(model_id))),
             "limit": model_limit(model_id),
         }
+        if metadata.get("reasoning"):
+            model_config.update({
+                "attachment": "image" in metadata.get("input", []),
+                "reasoning": True,
+                "tool_call": True,
+                "interleaved": {"field": "reasoning_content"},
+                "modalities": {
+                    "input": metadata.get("input", ["text"]),
+                    "output": ["text"],
+                },
+            })
+        provider_models[model_id] = model_config
+
+    retired_model_refs = {
+        f"{configured_provider_id}/{model_id}"
+        for configured_provider_id in data["provider"]
+        for model_id in retired_model_ids
+    }
+    if data.get("model") in retired_model_refs:
+        data["model"] = f"{provider_id}/qwen3.6-35b-a3b"
 
     data["provider"][provider_id] = {
         "npm": "@ai-sdk/openai-compatible",
