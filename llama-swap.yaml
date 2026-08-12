@@ -43,6 +43,54 @@ models:
       --repeat-penalty 1.0
       --alias agents-a1"
 
+  nemotron-3.5-lightning:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/gbuzhf/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MTP-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_XS.gguf
+      -ngl 999
+      -c 262144
+      -ctk f16 -ctv f16
+      -fa on
+      --parallel 1
+      --metrics
+      --host 127.0.0.1 --port 9000
+      --jinja
+      --reasoning on
+      --reasoning-format deepseek
+      --temp 1.0
+      --top-p 0.95
+      --top-k 0
+      --min-p 0
+      --alias nemotron-3.5-lightning"
+
+  nemotron-3.5-lightning-mtp:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/gbuzhf/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MTP-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_XS.gguf
+      -ngl 999
+      -c 262144
+      -ctk f16 -ctv f16
+      -fa on
+      --parallel 1
+      --metrics
+      --host 127.0.0.1 --port 9000
+      --jinja
+      --reasoning on
+      --reasoning-format deepseek
+      --spec-type draft-mtp
+      --spec-draft-n-max 1
+      --spec-draft-n-min 0
+      --spec-draft-p-min 0.75
+      --temp 1.0
+      --top-p 0.95
+      --top-k 0
+      --min-p 0
+      --alias nemotron-3.5-lightning-mtp"
+
   muse-glimmer-30b:
     proxy: http://127.0.0.1:9000
     ttl: 600

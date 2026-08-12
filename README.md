@@ -16,7 +16,7 @@ Single-port OpenAI-compatible chat-completions endpoint at `http://127.0.0.1:808
 
 ```
 opencode / pi
-      ↓  POST /v1/chat/completions  { "model": "qwen3.6-35b-a3b" | "agents-a1" | "muse-glimmer-30b" | "gemma-4-e4b" | "gemma-4-31b-qat" | "glm-4.7-flash" }
+      ↓  POST /v1/chat/completions  { "model": "qwen3.6-35b-a3b" | "agents-a1" | "nemotron-3.5-lightning" | "nemotron-3.5-lightning-mtp" | "muse-glimmer-30b" | "gemma-4-e4b" | "gemma-4-31b-qat" | "glm-4.7-flash" }
 http://127.0.0.1:8080
   llama-swap                          ← model registry: ~/Code/intel/llama-swap.yaml
       ↓  spawns/kills based on requested model
@@ -33,6 +33,8 @@ Only one llama-server runs at a time. First request to a different model trigger
 |---|---|---|---|---|
 | `qwen3.6-35b-a3b` | `~/.lmstudio/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_S.gguf` + `mmproj-F32.gguf` | UD-Q4_K_S | 256 K (q8_0 KV) | ~24.3 GB |
 | `agents-a1` | `~/.lmstudio/models/InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~25.1 GiB |
+| `nemotron-3.5-lightning` | `~/.lmstudio/models/gbuzhf/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MTP-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_XS.gguf` | UD-IQ4_XS | 256 K (f16 KV) | Not separately measured |
+| `nemotron-3.5-lightning-mtp` | Same MTP-preserving GGUF | UD-IQ4_XS + MTP | 256 K (f16 KV) | Not separately measured |
 | `muse-glimmer-30b` | `~/.lmstudio/models/lmstudio-community/Muse-Glimmer-30B-GGUF/muse-glimmer-30B-kquant-17gb.gguf` + `mmproj-kquant.gguf` | K-Quant-17GB | 128 K (q8_0 KV) | ~18.6 GB |
 | `gemma-4-e4b` | `~/.lmstudio/models/unsloth/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf` | Q4_K_M | 128 K (q8_0 KV) | ~6 GB |
 | `gemma-4-31b-qat` | `~/.lmstudio/models/lmstudio-community/gemma-4-31B-it-QAT-GGUF/gemma-4-31B-it-QAT-Q4_0.gguf` | Q4_0 QAT | 128 K (q8_0 KV) | ~20 GB |
@@ -45,6 +47,7 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 | Model | Prompt processing | Generation |
 |---|---|---|
 | Qwen3.6-35B-A3B UD-Q4_K_S | 220.0 t/s in tool-call smoke test | 55.0 t/s |
+| Nemotron 3.5 Lightning UD-IQ4_XS | ~144 t/s in controlled short-prompt tests | 66.2 t/s baseline; 39.0 t/s MTP |
 | Muse Glimmer 30B K-Quant-17GB | 22.5 t/s in tool-call smoke test | 24.2 t/s |
 | Agents-A1 Q4_K_M | 277.8 t/s at 32 tokens | 86.6 t/s bench; 81.6 t/s sustained server decode |
 | Gemma-4 E4B Q4_K_M | 1710 t/s | 76.5 t/s |
@@ -56,6 +59,7 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 - Prefer `agents-a1` for substantial coding, research, and tool-driven work. It combines 35B-class capacity, verified native tool use, a 256K context, and about 81.6 t/s sustained generation on this machine. It can spend many tokens reasoning, so simple tasks may take longer than its raw token rate suggests.
 - Use `gemma-4-e4b` for quick questions, summaries, transformations, and routine edits. Its small VRAM footprint, 1710 t/s prompt processing, and 76.5 t/s generation make it the fast path when the task does not need a larger model.
 - Use `qwen3.6-35b-a3b` as the balanced general-purpose option. Its Unsloth UD-Q4_K_S quant is the fastest large Qwen configuration measured here so far, and its projector, developer-role handling, reasoning extraction, and tool calls are validated.
+- Use `nemotron-3.5-lightning` to try NVIDIA's new text-only reasoning and agent model. Use the explicit `nemotron-3.5-lightning-mtp` alias only for MTP experiments; the current SYCL speculative path is slower and can intermittently stop making progress on longer generations.
 - Try `muse-glimmer-30b` for agentic and multimodal work. Its profile includes the perception projector, native ATEM tool-call parsing, reasoning extraction, and the model authors' sampling defaults. Generation is usable at about 24.2 t/s, though prompt ingestion was relatively slow in the first local test.
 - Keep `glm-4.7-flash` as an independent second opinion.
 
@@ -74,6 +78,15 @@ Agents-A1 tuning and usage notes:
 - Keep the embedded Jinja template. It supplies the Qwen3-Coder XML tool format, supports parallel calls, and preserves tool observations across turns. Local smoke tests verified parsed `tool_calls`, `reasoning_content`, and a complete call → tool response → final answer round trip.
 - The official Q4_K_M GGUF has no MTP/NextN tensors, so this profile deliberately does not enable speculative MTP. The optional 899 MB `Agents-A1-mmproj.gguf` was not downloaded and is not attached; the alias is text-only. Add a separate multimodal alias with `--mmproj` if vision is needed later.
 - Use the native 262K context without RoPE scaling. Keep `--parallel 1` and flash attention. Controlled generation measured `80.51 t/s` with q8 KV and `86.56 t/s` with f16 KV; a matching 1,024-token server decode improved from `75.46` to `81.58 t/s` (+8.1%). The f16 profile also held the compute engine near 100% busy at 2.8 GHz, so higher polling and experimental SYCL graphs are not enabled.
+
+Nemotron 3.5 Lightning tuning and usage notes:
+
+- [NVIDIA Nemotron 3.5 Lightning 30B-A3B](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) is a text-only hybrid MoE model with 30B total and 3B active parameters, configurable reasoning, native tool use, and a 1M maximum context. Both B70 aliases use 256K to leave practical memory headroom on its 32 GB card.
+- The profile follows NVIDIA's recommended `temperature=1.0` and `top_p=0.95`. It explicitly disables llama.cpp's otherwise-active top-k and min-p filters so those extra samplers do not change the published recipe.
+- Keep the GGUF's embedded Jinja template. It enables thinking by default, emits Qwen3-Coder-style XML tool calls, folds tool results back into user messages as expected by the model, and truncates earlier reasoning traces in multi-turn history. `--reasoning-format deepseek` exposes the current trace as OpenAI-compatible `reasoning_content`.
+- [This UD-IQ4_XS quant](https://huggingface.co/gbuzhf/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MTP-GGUF) retains the native Q8_0 MTP draft head as `blk.52.nextn.*`. The stable alias ignores that optional head; the experimental `-mtp` alias uses one draft token with the publisher's 0.75 probability floor. The suggested additional `ngram-mod` drafter is omitted because it was pathological on this SYCL backend.
+- Three warm 256-token chat runs averaged 66.24 t/s without speculation and 38.97 t/s with MTP, a 41.2% regression despite accepting 127/127 draft tokens in every MTP run. A sustained 1,024-token baseline decode delivered 65.34 t/s at 185.0 W package power, while a stalled MTP run drew only 130.2 W; both held the compute GT at its 2.8 GHz maximum. The MTP path's 100% reported GPU busy therefore did not translate into useful throughput or full power utilization.
+- Short MTP chat and a complete call → tool response → final answer round trip succeeded with parsed `reasoning_content` and `tool_calls`. Longer completion and real OpenCode agent runs could stop advancing while the GPU remained busy. Draft q8 KV, always-draft probability, host-side draft sampling, and the combined n-gram recipe did not make those runs reliable. The behavior is consistent with upstream reports of [MTP overhead on an Arc Pro B70](https://github.com/ggml-org/llama.cpp/issues/23533) and [intermittent speculative-decoding hangs](https://github.com/ggml-org/llama.cpp/issues/23268); keep the non-MTP alias for agent work until that path is fixed.
 
 Muse Glimmer tuning and usage notes:
 
@@ -199,7 +212,7 @@ Status endpoints:
 | `http://127.0.0.1:9000/slots` | While a model is loaded | Per-slot state, processed tokens, and timings |
 | `http://127.0.0.1:9000/metrics` | While a model is loaded | Prometheus-format request, token, prompt, and cache metrics (`--metrics` is enabled in each model profile) |
 
-These interfaces do not provide Intel GPU utilization, temperature, power, or complete VRAM telemetry. Use the installed `intel_gpu_top` for hardware monitoring; `xpu-smi` is another option if installed separately.
+These interfaces do not provide Intel GPU utilization, temperature, power, or complete VRAM telemetry. Use `nvtop` interactively for the B70 telemetry it exposes; package-energy counters are available under `/sys/class/drm/card0/device/hwmon/hwmon*/energy*_input`. The installed `intel_gpu_top` does not support the `xe` driver, and `xpu-smi` is not installed.
 
 ## Using opencode
 
@@ -209,12 +222,16 @@ Config: `~/.config/opencode/opencode.json` — provider `local-b70`; the existin
 opencode                                     # interactive TUI, default model
 opencode -m local-b70/qwen3.6-35b-a3b        # interactive TUI, balanced Qwen MoE
 opencode -m local-b70/agents-a1               # interactive TUI, long-horizon agent model
+opencode -m local-b70/nemotron-3.5-lightning  # interactive TUI, stable Nemotron profile
+opencode -m local-b70/nemotron-3.5-lightning-mtp # interactive TUI, experimental MTP
 opencode -m local-b70/muse-glimmer-30b        # interactive TUI, agentic + vision model
 opencode -m local-b70/gemma-4-e4b            # interactive TUI, gemma
 opencode -m local-b70/glm-4.7-flash          # interactive TUI, GLM
 opencode run "summarize this file" @file.py  # one-shot, default model
 opencode run -m local-b70/qwen3.6-35b-a3b "..." # one-shot, balanced Qwen MoE
 opencode run -m local-b70/agents-a1 "..."    # one-shot, long-horizon agent model
+opencode run -m local-b70/nemotron-3.5-lightning "..." # one-shot, Nemotron
+opencode run -m local-b70/nemotron-3.5-lightning-mtp "..." # one-shot, experimental MTP
 opencode run -m local-b70/muse-glimmer-30b "..." # one-shot, Muse Glimmer
 opencode run -m local-b70/gemma-4-e4b "..."  # one-shot, gemma
 opencode run -m local-b70/glm-4.7-flash "..." # one-shot, GLM
@@ -229,6 +246,8 @@ Config: `~/.pi/agent/models.json` — provider `local-b70`, all active llama-swa
 ```bash
 pi --provider local-b70 --model qwen3.6-35b-a3b
 pi --provider local-b70 --model agents-a1
+pi --provider local-b70 --model nemotron-3.5-lightning
+pi --provider local-b70 --model nemotron-3.5-lightning-mtp
 pi --provider local-b70 --model muse-glimmer-30b
 pi --provider local-b70 --model gemma-4-e4b -p "one-shot prompt"
 pi --provider local-b70 --model glm-4.7-flash -p "one-shot prompt"

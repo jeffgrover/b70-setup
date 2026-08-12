@@ -31,6 +31,26 @@
           "maxTokens": 262144
         },
         {
+          "id": "nemotron-3.5-lightning",
+          "contextWindow": 262144,
+          "maxTokens": 262144,
+          "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B UD-IQ4_XS (256K)",
+          "reasoning": true,
+          "input": [
+            "text"
+          ]
+        },
+        {
+          "id": "nemotron-3.5-lightning-mtp",
+          "contextWindow": 262144,
+          "maxTokens": 262144,
+          "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B UD-IQ4_XS (256K, experimental MTP)",
+          "reasoning": true,
+          "input": [
+            "text"
+          ]
+        },
+        {
           "id": "muse-glimmer-30b",
           "name": "Muse Glimmer 30B K-Quant (128K, vision)",
           "reasoning": true,
