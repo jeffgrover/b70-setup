@@ -40,7 +40,7 @@
           }
         },
         "nemotron-3.5-lightning": {
-          "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B UD-IQ4_XS (256K)",
+          "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B Q4_K_S (256K)",
           "limit": {
             "context": 262144,
             "output": 262144
@@ -61,7 +61,7 @@
           }
         },
         "nemotron-3.5-lightning-mtp": {
-          "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B UD-IQ4_XS (256K, experimental MTP)",
+          "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B Q4_K_S (256K, experimental MTP)",
           "limit": {
             "context": 262144,
             "output": 262144

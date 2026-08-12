@@ -33,8 +33,8 @@ Only one llama-server runs at a time. First request to a different model trigger
 |---|---|---|---|---|
 | `qwen3.6-35b-a3b` | `~/.lmstudio/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_S.gguf` + `mmproj-F32.gguf` | UD-Q4_K_S | 256 K (q8_0 KV) | ~24.3 GB |
 | `agents-a1` | `~/.lmstudio/models/InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~25.1 GiB |
-| `nemotron-3.5-lightning` | `~/.lmstudio/models/gbuzhf/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MTP-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_XS.gguf` | UD-IQ4_XS | 256 K (f16 KV) | Not separately measured |
-| `nemotron-3.5-lightning-mtp` | Same MTP-preserving GGUF | UD-IQ4_XS + MTP | 256 K (f16 KV) | Not separately measured |
+| `nemotron-3.5-lightning` | `~/.lmstudio/models/bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_K_S.gguf` | Q4_K_S | 256 K (f16 KV) | ~24.3 GB |
+| `nemotron-3.5-lightning-mtp` | Same MTP-preserving GGUF | Q4_K_S + MTP | 256 K (f16 KV) | ~24.3 GB |
 | `muse-glimmer-30b` | `~/.lmstudio/models/lmstudio-community/Muse-Glimmer-30B-GGUF/muse-glimmer-30B-kquant-17gb.gguf` + `mmproj-kquant.gguf` | K-Quant-17GB | 128 K (q8_0 KV) | ~18.6 GB |
 | `gemma-4-e4b` | `~/.lmstudio/models/unsloth/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf` | Q4_K_M | 128 K (q8_0 KV) | ~6 GB |
 | `gemma-4-31b-qat` | `~/.lmstudio/models/lmstudio-community/gemma-4-31B-it-QAT-GGUF/gemma-4-31B-it-QAT-Q4_0.gguf` | Q4_0 QAT | 128 K (q8_0 KV) | ~20 GB |
@@ -47,7 +47,7 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 | Model | Prompt processing | Generation |
 |---|---|---|
 | Qwen3.6-35B-A3B UD-Q4_K_S | 220.0 t/s in tool-call smoke test | 55.0 t/s |
-| Nemotron 3.5 Lightning UD-IQ4_XS | ~144 t/s in controlled short-prompt tests | 66.2 t/s baseline; 39.0 t/s MTP |
+| Nemotron 3.5 Lightning Q4_K_S | 342.4 t/s baseline; 336.7 t/s MTP | 56.5 t/s baseline; 30.8 t/s MTP |
 | Muse Glimmer 30B K-Quant-17GB | 22.5 t/s in tool-call smoke test | 24.2 t/s |
 | Agents-A1 Q4_K_M | 277.8 t/s at 32 tokens | 86.6 t/s bench; 81.6 t/s sustained server decode |
 | Gemma-4 E4B Q4_K_M | 1710 t/s | 76.5 t/s |
@@ -84,9 +84,9 @@ Nemotron 3.5 Lightning tuning and usage notes:
 - [NVIDIA Nemotron 3.5 Lightning 30B-A3B](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16) is a text-only hybrid MoE model with 30B total and 3B active parameters, configurable reasoning, native tool use, and a 1M maximum context. Both B70 aliases use 256K to leave practical memory headroom on its 32 GB card.
 - The profile follows NVIDIA's recommended `temperature=1.0` and `top_p=0.95`. It explicitly disables llama.cpp's otherwise-active top-k and min-p filters so those extra samplers do not change the published recipe.
 - Keep the GGUF's embedded Jinja template. It enables thinking by default, emits Qwen3-Coder-style XML tool calls, folds tool results back into user messages as expected by the model, and truncates earlier reasoning traces in multi-turn history. `--reasoning-format deepseek` exposes the current trace as OpenAI-compatible `reasoning_content`.
-- [This UD-IQ4_XS quant](https://huggingface.co/gbuzhf/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MTP-GGUF) retains the native Q8_0 MTP draft head as `blk.52.nextn.*`. The stable alias ignores that optional head; the experimental `-mtp` alias uses one draft token with the publisher's 0.75 probability floor. The suggested additional `ngram-mod` drafter is omitted because it was pathological on this SYCL backend.
-- Three warm 256-token chat runs averaged 66.24 t/s without speculation and 38.97 t/s with MTP, a 41.2% regression despite accepting 127/127 draft tokens in every MTP run. A sustained 1,024-token baseline decode delivered 65.34 t/s at 185.0 W package power, while a stalled MTP run drew only 130.2 W; both held the compute GT at its 2.8 GHz maximum. The MTP path's 100% reported GPU busy therefore did not translate into useful throughput or full power utilization.
-- Short MTP chat and a complete call → tool response → final answer round trip succeeded with parsed `reasoning_content` and `tool_calls`. Longer completion and real OpenCode agent runs could stop advancing while the GPU remained busy. Draft q8 KV, always-draft probability, host-side draft sampling, and the combined n-gram recipe did not make those runs reliable. The behavior is consistent with upstream reports of [MTP overhead on an Arc Pro B70](https://github.com/ggml-org/llama.cpp/issues/23533) and [intermittent speculative-decoding hangs](https://github.com/ggml-org/llama.cpp/issues/23268); keep the non-MTP alias for agent work until that path is fixed.
+- [Bartowski's Q4_K_S quant](https://huggingface.co/bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF) includes the native MTP draft layer as `blk.52.nextn.*`, with the draft projection quantized at Q4_0. The stable alias ignores that optional head; the experimental `-mtp` alias uses one draft token with a 0.75 probability floor. The suggested additional `ngram-mod` drafter remains omitted because it was pathological on this SYCL backend.
+- The downloaded Q4_K_S matches Bartowski's published SHA-256 (`82d6eb30…869c752`). Both aliases loaded at 256K and used about 76% of the B70's VRAM. Required-tool smoke tests returned parsed `reasoning_content` and correct OpenAI `tool_calls` through both paths.
+- In those matched short tests, normal decoding delivered 56.5 t/s while MTP delivered 30.8 t/s despite accepting all 30 draft tokens. The previous gbuzhf quant showed the same direction: 66.24 t/s without speculation and 38.97 t/s with MTP. Keep the non-MTP alias for agent work; MTP remains experimental on this SYCL backend due to the regression and earlier longer-run stalls. This is consistent with upstream reports of [MTP overhead on an Arc Pro B70](https://github.com/ggml-org/llama.cpp/issues/23533) and [intermittent speculative-decoding hangs](https://github.com/ggml-org/llama.cpp/issues/23268).
 
 Muse Glimmer tuning and usage notes:
 

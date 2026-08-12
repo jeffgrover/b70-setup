@@ -34,7 +34,7 @@
           "id": "nemotron-3.5-lightning",
           "contextWindow": 262144,
           "maxTokens": 262144,
-          "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B UD-IQ4_XS (256K)",
+          "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B Q4_K_S (256K)",
           "reasoning": true,
           "input": [
             "text"
@@ -44,7 +44,7 @@
           "id": "nemotron-3.5-lightning-mtp",
           "contextWindow": 262144,
           "maxTokens": 262144,
-          "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B UD-IQ4_XS (256K, experimental MTP)",
+          "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B Q4_K_S (256K, experimental MTP)",
           "reasoning": true,
           "input": [
             "text"

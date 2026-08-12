@@ -48,7 +48,7 @@ models:
     ttl: 600
     cmd: >
       bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
-      -m /home/jeff/.lmstudio/models/gbuzhf/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MTP-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_XS.gguf
+      -m /home/jeff/.lmstudio/models/bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_K_S.gguf
       -ngl 999
       -c 262144
       -ctk f16 -ctv f16
@@ -70,7 +70,7 @@ models:
     ttl: 600
     cmd: >
       bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
-      -m /home/jeff/.lmstudio/models/gbuzhf/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-MTP-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_XS.gguf
+      -m /home/jeff/.lmstudio/models/bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_K_S.gguf
       -ngl 999
       -c 262144
       -ctk f16 -ctv f16
