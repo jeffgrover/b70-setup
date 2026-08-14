@@ -25,6 +25,36 @@
           "maxTokens": 262144
         },
         {
+          "id": "qwen3.8-27b",
+          "contextWindow": 262144,
+          "maxTokens": 262144,
+          "name": "Qwen3.8-27B Q4_K_S (256K, vision)",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": true,
+            "supportsReasoningEffort": true
+          }
+        },
+        {
+          "id": "qwen3.8-27b-mtp",
+          "contextWindow": 262144,
+          "maxTokens": 262144,
+          "name": "Qwen3.8-27B Q4_K_S (256K, vision, experimental MTP)",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": true,
+            "supportsReasoningEffort": true
+          }
+        },
+        {
           "id": "agents-a1",
           "name": "Agents-A1 Q4_K_M (256K)",
           "contextWindow": 262144,

@@ -91,6 +91,24 @@ model_metadata = {
             "supportsReasoningEffort": False,
         },
     },
+    "qwen3.8-27b": {
+        "name": "Qwen3.8-27B Q4_K_S (256K, vision)",
+        "reasoning": True,
+        "input": ["text", "image"],
+        "compat": {
+            "supportsDeveloperRole": True,
+            "supportsReasoningEffort": True,
+        },
+    },
+    "qwen3.8-27b-mtp": {
+        "name": "Qwen3.8-27B Q4_K_S (256K, vision, experimental MTP)",
+        "reasoning": True,
+        "input": ["text", "image"],
+        "compat": {
+            "supportsDeveloperRole": True,
+            "supportsReasoningEffort": True,
+        },
+    },
     "nemotron-3.5-lightning": {
         "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B Q4_K_S (256K)",
         "reasoning": True,

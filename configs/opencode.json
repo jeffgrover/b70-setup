@@ -32,6 +32,50 @@
             "output": 262144
           }
         },
+        "qwen3.8-27b": {
+          "name": "Qwen3.8-27B Q4_K_S (256K, vision)",
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
+        "qwen3.8-27b-mtp": {
+          "name": "Qwen3.8-27B Q4_K_S (256K, vision, experimental MTP)",
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
         "agents-a1": {
           "name": "Agents-A1 Q4_K_M (256K)",
           "limit": {

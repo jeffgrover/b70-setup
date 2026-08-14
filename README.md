@@ -16,7 +16,7 @@ Single-port OpenAI-compatible chat-completions endpoint at `http://127.0.0.1:808
 
 ```
 opencode / pi
-      ↓  POST /v1/chat/completions  { "model": "qwen3.6-35b-a3b" | "agents-a1" | "nemotron-3.5-lightning" | "nemotron-3.5-lightning-mtp" | "muse-glimmer-30b" | "gemma-4-e4b" | "gemma-4-31b-qat" | "glm-4.7-flash" }
+      ↓  POST /v1/chat/completions  { "model": "qwen3.6-35b-a3b" | "qwen3.8-27b" | "qwen3.8-27b-mtp" | "agents-a1" | "nemotron-3.5-lightning" | "nemotron-3.5-lightning-mtp" | "muse-glimmer-30b" | "gemma-4-e4b" | "gemma-4-31b-qat" | "glm-4.7-flash" }
 http://127.0.0.1:8080
   llama-swap                          ← model registry: ~/Code/intel/llama-swap.yaml
       ↓  spawns/kills based on requested model
@@ -32,6 +32,8 @@ Only one llama-server runs at a time. First request to a different model trigger
 | Model | Path | Quant | Context | VRAM |
 |---|---|---|---|---|
 | `qwen3.6-35b-a3b` | `~/.lmstudio/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_S.gguf` + `mmproj-F32.gguf` | UD-Q4_K_S | 256 K (q8_0 KV) | ~24.3 GB |
+| `qwen3.8-27b` | `~/.lmstudio/models/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_S.gguf` + `mmproj-F16.gguf` | Q4_K_S | 256 K (q8_0 KV) | ~24.2 GiB (78%) |
+| `qwen3.8-27b-mtp` | Same MTP-preserving GGUF + projector | Q4_K_S + MTP | 256 K (q8_0 KV) | ~24.2 GiB (78%) |
 | `agents-a1` | `~/.lmstudio/models/InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~25.1 GiB |
 | `nemotron-3.5-lightning` | `~/.lmstudio/models/bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_K_S.gguf` | Q4_K_S | 256 K (f16 KV) | ~24.3 GB |
 | `nemotron-3.5-lightning-mtp` | Same MTP-preserving GGUF | Q4_K_S + MTP | 256 K (f16 KV) | ~24.3 GB |
@@ -47,6 +49,7 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 | Model | Prompt processing | Generation |
 |---|---|---|
 | Qwen3.6-35B-A3B UD-Q4_K_S | 220.0 t/s in tool-call smoke test | 55.0 t/s |
+| Qwen3.8-27B Q4_K_S | 836.5 t/s at 512 tokens; 864.7 t/s at 2,048 | 25.9 t/s baseline; 31.1 t/s MTP |
 | Nemotron 3.5 Lightning Q4_K_S | 342.4 t/s baseline; 336.7 t/s MTP | 56.5 t/s baseline; 30.8 t/s MTP |
 | Muse Glimmer 30B K-Quant-17GB | 22.5 t/s in tool-call smoke test | 24.2 t/s |
 | Agents-A1 Q4_K_M | 277.8 t/s at 32 tokens | 86.6 t/s bench; 81.6 t/s sustained server decode |
@@ -59,6 +62,7 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 - Prefer `agents-a1` for substantial coding, research, and tool-driven work. It combines 35B-class capacity, verified native tool use, a 256K context, and about 81.6 t/s sustained generation on this machine. It can spend many tokens reasoning, so simple tasks may take longer than its raw token rate suggests.
 - Use `gemma-4-e4b` for quick questions, summaries, transformations, and routine edits. Its small VRAM footprint, 1710 t/s prompt processing, and 76.5 t/s generation make it the fast path when the task does not need a larger model.
 - Use `qwen3.6-35b-a3b` as the balanced general-purpose option. Its Unsloth UD-Q4_K_S quant is the fastest large Qwen configuration measured here so far, and its projector, developer-role handling, reasoning extraction, and tool calls are validated.
+- Use `qwen3.8-27b` for the newest dense Qwen coding, professional-work, research, vision, and long-horizon agent capabilities. The `qwen3.8-27b-mtp` alias is the faster local path after a 20% measured decode gain and successful 1,024-token, tool, vision, Pi, and OpenCode tests; retain the non-MTP alias as the conservative fallback while the new path accumulates longer production history.
 - Use `nemotron-3.5-lightning` to try NVIDIA's new text-only reasoning and agent model. Use the explicit `nemotron-3.5-lightning-mtp` alias only for MTP experiments; the current SYCL speculative path is slower and can intermittently stop making progress on longer generations.
 - Try `muse-glimmer-30b` for agentic and multimodal work. Its profile includes the perception projector, native ATEM tool-call parsing, reasoning extraction, and the model authors' sampling defaults. Generation is usable at about 24.2 t/s, though prompt ingestion was relatively slow in the first local test.
 - Keep `glm-4.7-flash` as an independent second opinion.
@@ -69,6 +73,16 @@ Qwen3.6-35B-A3B tuning notes:
 
 - The previous LM Studio Q4_K_M quant validated at 262K q8 KV and left about 8.7 GiB free on the B70. It measured `37.2 t/s` with q8 KV and `40.1 t/s` with f16 KV; flash attention was required.
 - The active alias now targets Unsloth's UD-Q4_K_S quant and attaches its F32 multimodal projector. It keeps q8 KV to preserve the 256K agent context. The profile validated at about 24.3 GB VRAM, leaving roughly 7.7 GB free, and produced 55.0 t/s in the first short tool-call test.
+
+Qwen3.8-27B tuning and usage notes:
+
+- [Qwen3.8-27B](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF) is a dense native vision-language model with 27B parameters, 64 layers, and a repeating hybrid layout of three Gated DeltaNet blocks followed by one full-attention block. It has a native 262,144-token context and can be extended toward 1M with YaRN; these profiles stay at the native limit.
+- The selected Q4_K_S GGUF is 16,121,359,328 bytes and attaches the 927,607,488-byte F16 vision projector. The 16 full-attention layers would require roughly 16 GiB for a 262K f16 KV cache, so the profile uses q8 KV (roughly 8 GiB) to leave room for weights, the projector, recurrent state, and compute buffers on the 32 GB B70.
+- Thinking is enabled by default. Server sampling follows the published thinking recipe: `temperature=1.0`, `top_p=0.95`, `top_k=20`, `min_p=0`, `presence_penalty=0`, and `repetition_penalty=1`. The model supports developer messages and request-level `reasoning_effort`; the rebuilt llama.cpp server now passes that field into the embedded template.
+- Both downloads match their published SHA-256 values (`22200efc…a3eb3f9` for the model and `cbb841a9…0b4e43e` for the projector). The 866-tensor model retains a Q8_0 MTP projection and the required normalization tensors at `blk.64.nextn.*`. Both aliases load at 256K and occupy about 78% of the B70's 31.0 GiB exposed memory, roughly 24.2 GiB.
+- The stable alias does not enable speculation. Matched warm 256-token runs averaged 25.87 t/s normally. MTP with one, two, and three draft tokens averaged 31.13, 30.62, and 29.25 t/s respectively, so the final alias uses `--spec-type draft-mtp --spec-draft-n-max 1`. Its 351/476 acceptance rate was 73.7%, and its 20.3% speedup is the first local MTP win measured on this SYCL stack.
+- Sustained 1,024-token runs completed at 25.47 t/s baseline and 30.81 t/s MTP, with the latter accepting 464/620 drafts (74.8%). Both paths averaged 230.2 W package power and settled near 2.5 GHz under the card's power limit; unlike stalled Nemotron MTP, Qwen3.8 converts the same full power draw into higher useful throughput.
+- Required-tool and complete tool-result round trips returned parsed `tool_calls`, separate `reasoning_content`, and a correct final answer with `reasoning_effort=low`. The F16 projector correctly identified the local llama.cpp logo, Pi returned the exact requested sentinel, and a real OpenCode run completed its `read` call and final response through the MTP alias.
 
 Agents-A1 tuning and usage notes:
 
@@ -104,7 +118,14 @@ For comparison, LM Studio's bundled Vulkan llama.cpp measured ~9 t/s in the hist
 
 ## llama.cpp update notes
 
-Current local build: `030ebb558` (`b10356-2-g030ebb558`, binary build 1426), built with IntelLLVM 2026.1.1.
+Current local build: `7e4c0a968` (`b10434`, binary build 1502), built with IntelLLVM 2026.1.1.
+
+### Maintenance record: 2026-08-14
+
+- Fast-forwarded the clean llama.cpp checkout by 76 commits from `030ebb558` (`b10356-2-g030ebb558`) to `7e4c0a968` (`b10434`) before profiling Qwen3.8-27B.
+- Incrementally rebuilt `llama-server`, `llama-bench`, and `test-backend-ops` with the existing Level Zero, oneDNN, FP16-kernel, SYCL-graph, and host-memory-fallback configuration. The matching embedded web UI is build 1502.
+- The update adds directly relevant SYCL optimizations for fused Q4_K dense-FFN gate/up projections and Gated DeltaNet state writeback, enables host-pinned memory, improves recurrent-state rollback, auto-detects MTP draft types, and passes OpenAI `reasoning_effort` into chat templates.
+- Focused post-build validation passed all 40 Gated DeltaNet and gated-linear-attention correctness cases on `SYCL0` (Arc Pro B70, Level Zero driver `1.14.37020`).
 
 ### Maintenance record: 2026-08-10
 
@@ -221,6 +242,8 @@ Config: `~/.config/opencode/opencode.json` — provider `local-b70`; the existin
 ```bash
 opencode                                     # interactive TUI, default model
 opencode -m local-b70/qwen3.6-35b-a3b        # interactive TUI, balanced Qwen MoE
+opencode -m local-b70/qwen3.8-27b             # interactive TUI, stable Qwen3.8 profile
+opencode -m local-b70/qwen3.8-27b-mtp         # interactive TUI, experimental MTP
 opencode -m local-b70/agents-a1               # interactive TUI, long-horizon agent model
 opencode -m local-b70/nemotron-3.5-lightning  # interactive TUI, stable Nemotron profile
 opencode -m local-b70/nemotron-3.5-lightning-mtp # interactive TUI, experimental MTP
@@ -229,6 +252,8 @@ opencode -m local-b70/gemma-4-e4b            # interactive TUI, gemma
 opencode -m local-b70/glm-4.7-flash          # interactive TUI, GLM
 opencode run "summarize this file" @file.py  # one-shot, default model
 opencode run -m local-b70/qwen3.6-35b-a3b "..." # one-shot, balanced Qwen MoE
+opencode run -m local-b70/qwen3.8-27b "..."  # one-shot, stable Qwen3.8
+opencode run -m local-b70/qwen3.8-27b-mtp "..." # one-shot, experimental MTP
 opencode run -m local-b70/agents-a1 "..."    # one-shot, long-horizon agent model
 opencode run -m local-b70/nemotron-3.5-lightning "..." # one-shot, Nemotron
 opencode run -m local-b70/nemotron-3.5-lightning-mtp "..." # one-shot, experimental MTP
@@ -245,6 +270,8 @@ Config: `~/.pi/agent/models.json` — provider `local-b70`, all active llama-swa
 
 ```bash
 pi --provider local-b70 --model qwen3.6-35b-a3b
+pi --provider local-b70 --model qwen3.8-27b
+pi --provider local-b70 --model qwen3.8-27b-mtp
 pi --provider local-b70 --model agents-a1
 pi --provider local-b70 --model nemotron-3.5-lightning
 pi --provider local-b70 --model nemotron-3.5-lightning-mtp
