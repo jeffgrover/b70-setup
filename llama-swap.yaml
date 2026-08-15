@@ -36,11 +36,13 @@ models:
       --jinja
       --reasoning on
       --reasoning-format deepseek
+      --reasoning-budget 2048
+      --reasoning-preserve
       --temp 1.0
       --top-p 0.95
       --top-k 20
       --min-p 0
-      --presence-penalty 0
+      --presence-penalty 1.5
       --repeat-penalty 1.0
       --alias qwen3.8-27b"
 
@@ -61,13 +63,15 @@ models:
       --jinja
       --reasoning on
       --reasoning-format deepseek
+      --reasoning-budget 2048
+      --reasoning-preserve
       --spec-type draft-mtp
       --spec-draft-n-max 1
       --temp 1.0
       --top-p 0.95
       --top-k 20
       --min-p 0
-      --presence-penalty 0
+      --presence-penalty 1.5
       --repeat-penalty 1.0
       --alias qwen3.8-27b-mtp"
 
