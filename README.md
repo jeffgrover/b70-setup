@@ -59,6 +59,37 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 | Gemma-4 31B QAT Q4_0 | 283.8 t/s | 10.9 t/s |
 | GLM-4.7-Flash Q4_K_M | 496.2 t/s | 20.4 t/s |
 
+### Agentic evaluation: Qwen3.8 before and after tuning
+
+On 2026-08-19, the same office/elevator tasks were rerun through the real
+`llama-server`/llama-swap path after switching agent work to
+`qwen3.8-27b-think` (128K f16 KV, one-token MTP, an 8192-token reasoning
+ceiling, and zero presence penalty). The archived baseline used the older
+`qwen3.8-27b` profile, so this is an end-to-end profile comparison rather
+than a single-variable benchmark.
+
+| Run | Result | Tokens (input + output) | Turns | Wall time | Quality checks |
+|---|---|---:|---:|---:|---|
+| Pi standard, baseline `qwen3.8-27b` | success | 214,639 + 155,999 | 102 | not recorded by the harness | static/runtime clean |
+| Pi standard, tuned `qwen3.8-27b-think` | success | 143,422 + 99,289 | 63 | approximately 1h40m service window | static/runtime clean |
+| Pi-Wiggum, baseline `qwen3.8-27b` | pass | 95,341 + 40,455 | 42 | 2h12m04s | 7/7 logic tests; no browser errors |
+| Pi-Wiggum, tuned `qwen3.8-27b-think` | pass | 161,872 + 109,356 | 60 | 1h45m17s | 7/7 logic tests; no browser errors |
+
+The tuned Wiggum run finished 20.3% faster (26m47s saved) while producing
+roughly twice as many tokens. Both runs produced the same 1,794 scene objects;
+the tuned run observed 160 animation frames and 1,326 dynamic changes versus
+149 and 1,194 before tuning. The standard run also passed its static and
+runtime probes, although its generated scene was smaller than the baseline,
+so those lightweight probes do not establish semantic parity by themselves.
+
+The harness did not retain separate prompt-processing and generation rates for
+these long runs. The short controlled measurements above remain the reliable
+throughput data: f16 KV recovered the deep-context slowdown, and one-token MTP
+reached about 33.8 t/s with 86% draft acceptance. The practical conclusion is
+to keep `qwen3.8-27b-think` as the 128K daily agent profile, keep
+`qwen3.8-27b-mtp` for 256K contexts, and retain the non-speculative
+`qwen3.8-27b` alias as a fallback.
+
 ### Choosing a model
 
 - Prefer `agents-a1` for substantial coding, research, and tool-driven work. It combines 35B-class capacity, verified native tool use, a 256K context, and about 81.6 t/s sustained generation on this machine. It can spend many tokens reasoning, so simple tasks may take longer than its raw token rate suggests.
