@@ -76,11 +76,47 @@
             ]
           }
         },
+        "qwen3.8-27b-think": {
+          "name": "Qwen3.8-27B Q4_K_S (128K f16 KV, vision, MTP, thinking-tuned)",
+          "limit": {
+            "context": 131072,
+            "output": 131072
+          },
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
         "agents-a1": {
           "name": "Agents-A1 Q4_K_M (256K)",
           "limit": {
             "context": 262144,
             "output": 262144
+          },
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
           }
         },
         "nemotron-3.5-lightning": {

@@ -16,7 +16,7 @@ Single-port OpenAI-compatible chat-completions endpoint at `http://127.0.0.1:808
 
 ```
 opencode / pi
-      ↓  POST /v1/chat/completions  { "model": "qwen3.6-35b-a3b" | "qwen3.8-27b" | "qwen3.8-27b-mtp" | "agents-a1" | "nemotron-3.5-lightning" | "nemotron-3.5-lightning-mtp" | "muse-glimmer-30b" | "gemma-4-e4b" | "gemma-4-31b-qat" | "glm-4.7-flash" }
+      ↓  POST /v1/chat/completions  { "model": "qwen3.6-35b-a3b" | "qwen3.8-27b" | "qwen3.8-27b-mtp" | "qwen3.8-27b-think" | "agents-a1" | "nemotron-3.5-lightning" | "nemotron-3.5-lightning-mtp" | "muse-glimmer-30b" | "gemma-4-e4b" | "gemma-4-31b-qat" | "glm-4.7-flash" }
 http://127.0.0.1:8080
   llama-swap                          ← model registry: ~/Code/intel/llama-swap.yaml
       ↓  spawns/kills based on requested model
@@ -34,6 +34,7 @@ Only one llama-server runs at a time. First request to a different model trigger
 | `qwen3.6-35b-a3b` | `~/.lmstudio/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_S.gguf` + `mmproj-F32.gguf` | UD-Q4_K_S | 256 K (q8_0 KV) | ~24.3 GB |
 | `qwen3.8-27b` | `~/.lmstudio/models/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_S.gguf` + `mmproj-F16.gguf` | Q4_K_S | 256 K (q8_0 KV) | ~24.2 GiB (78%) |
 | `qwen3.8-27b-mtp` | Same MTP-preserving GGUF + projector | Q4_K_S + MTP | 256 K (q8_0 KV) | ~24.2 GiB (78%) |
+| `qwen3.8-27b-think` | Same MTP-preserving GGUF + projector | Q4_K_S + MTP | 128 K (f16 KV) | ~24.2 GiB (same KV footprint) |
 | `agents-a1` | `~/.lmstudio/models/InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~25.1 GiB |
 | `nemotron-3.5-lightning` | `~/.lmstudio/models/bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_K_S.gguf` | Q4_K_S | 256 K (f16 KV) | ~24.3 GB |
 | `nemotron-3.5-lightning-mtp` | Same MTP-preserving GGUF | Q4_K_S + MTP | 256 K (f16 KV) | ~24.3 GB |
@@ -49,7 +50,8 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 | Model | Prompt processing | Generation |
 |---|---|---|
 | Qwen3.6-35B-A3B UD-Q4_K_S | 220.0 t/s in tool-call smoke test | 55.0 t/s |
-| Qwen3.8-27B Q4_K_S | 836.5 t/s at 512 tokens; 864.7 t/s at 2,048 | 25.9 t/s baseline; 31.1 t/s MTP |
+| Qwen3.8-27B Q4_K_S | 836.5 t/s at 512 tokens; 864.7 t/s at 2,048 | 25.9 t/s baseline; 31.1 t/s MTP in the earlier 256K-profile tests |
+| Qwen3.8-27B depth study | ~844 t/s at 512 tokens; ~67 t/s for tiny uncached prompts | q8_0: 26.6 t/s empty, 15.5 at 16K; f16: 22.2 at 16K; f16 + MTP: 33.8 with 86% acceptance |
 | Nemotron 3.5 Lightning Q4_K_S | 342.4 t/s baseline; 336.7 t/s MTP | 56.5 t/s baseline; 30.8 t/s MTP |
 | Muse Glimmer 30B K-Quant-17GB | 22.5 t/s in tool-call smoke test | 24.2 t/s |
 | Agents-A1 Q4_K_M | 277.8 t/s at 32 tokens | 86.6 t/s bench; 81.6 t/s sustained server decode |
@@ -62,7 +64,7 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 - Prefer `agents-a1` for substantial coding, research, and tool-driven work. It combines 35B-class capacity, verified native tool use, a 256K context, and about 81.6 t/s sustained generation on this machine. It can spend many tokens reasoning, so simple tasks may take longer than its raw token rate suggests.
 - Use `gemma-4-e4b` for quick questions, summaries, transformations, and routine edits. Its small VRAM footprint, 1710 t/s prompt processing, and 76.5 t/s generation make it the fast path when the task does not need a larger model.
 - Use `qwen3.6-35b-a3b` as the balanced general-purpose option. Its Unsloth UD-Q4_K_S quant is the fastest large Qwen configuration measured here so far, and its projector, developer-role handling, reasoning extraction, and tool calls are validated.
-- Use `qwen3.8-27b` for the newest dense Qwen coding, professional-work, research, vision, and long-horizon agent capabilities. The `qwen3.8-27b-mtp` alias is the faster local path after a 20% measured decode gain and successful 1,024-token, tool, vision, Pi, and OpenCode tests; retain the non-MTP alias as the conservative fallback while the new path accumulates longer production history.
+- Use `qwen3.8-27b-think` as the daily Qwen profile for OpenCode, Pi, and other reasoning-heavy agent work when 128K context is enough. Its f16 KV cache avoids the severe q8_0 slowdown measured at depth, and one-token MTP improved the recorded reasoning run to 33.8 t/s. Use `qwen3.8-27b-mtp` when a 256K q8_0 context is required and `qwen3.8-27b` as the conservative non-speculative fallback.
 - Use `nemotron-3.5-lightning` to try NVIDIA's new text-only reasoning and agent model. Use the explicit `nemotron-3.5-lightning-mtp` alias only for MTP experiments; the current SYCL speculative path is slower and can intermittently stop making progress on longer generations.
 - Try `muse-glimmer-30b` for agentic and multimodal work. Its profile includes the perception projector, native ATEM tool-call parsing, reasoning extraction, and the model authors' sampling defaults. Generation is usable at about 24.2 t/s, though prompt ingestion was relatively slow in the first local test.
 - Keep `glm-4.7-flash` as an independent second opinion.
@@ -76,12 +78,15 @@ Qwen3.6-35B-A3B tuning notes:
 
 Qwen3.8-27B tuning and usage notes:
 
-- [Qwen3.8-27B](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF) is a dense native vision-language model with 27B parameters, 64 layers, and a repeating hybrid layout of three Gated DeltaNet blocks followed by one full-attention block. It has a native 262,144-token context and can be extended toward 1M with YaRN; these profiles stay at the native limit.
-- The selected Q4_K_S GGUF is 16,121,359,328 bytes and attaches the 927,607,488-byte F16 vision projector. The 16 full-attention layers would require roughly 16 GiB for a 262K f16 KV cache, so the profile uses q8 KV (roughly 8 GiB) to leave room for weights, the projector, recurrent state, and compute buffers on the 32 GB B70.
-- Thinking is enabled by default. Temperature and truncation sampling follow the published thinking recipe: `temperature=1.0`, `top_p=0.95`, `top_k=20`, `min_p=0`, and `repetition_penalty=1`. Practical agentic evaluation showed that the original unrestricted reasoning and `presence_penalty=0` could spend too long reasoning or revisit prior material, so both local profiles now use `--reasoning-budget 2048`, `--reasoning-preserve`, and `--presence-penalty 1.5`. The model supports developer messages and request-level `reasoning_effort`; the rebuilt llama.cpp server passes that field into the embedded template. Request sampling parameters can still override the server defaults.
-- Both downloads match their published SHA-256 values (`22200efc…a3eb3f9` for the model and `cbb841a9…0b4e43e` for the projector). The 866-tensor model retains a Q8_0 MTP projection and the required normalization tensors at `blk.64.nextn.*`. Both aliases load at 256K and occupy about 78% of the B70's 31.0 GiB exposed memory, roughly 24.2 GiB.
+- [Qwen3.8-27B](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF) is a dense native vision-language model with 27B parameters, 64 layers, and a repeating hybrid layout of three Gated DeltaNet blocks followed by one full-attention block. It has a native 262,144-token context and can be extended toward 1M with YaRN; the standard profiles stay at the native limit, while `-think` deliberately trades half the context for f16 KV.
+- The selected Q4_K_S GGUF is 16,121,359,328 bytes and attaches the 927,607,488-byte F16 vision projector. Across the 16 full-attention layers, f16 KV consumes exactly 64 KiB per token (`16 layers × 4 KV heads × 256 dimensions × K/V × 2 bytes`): 8 GiB at 128K or 16 GiB at 256K. The two 256K profiles therefore use q8_0 KV (roughly 8 GiB), while `-think` spends the same cache footprint on higher-precision f16 at 128K.
+- Thinking is enabled by default. Temperature and truncation sampling follow the published thinking recipe: `temperature=1.0`, `top_p=0.95`, `top_k=20`, `min_p=0`, and `repetition_penalty=1`. Practical agentic evaluation showed that unrestricted reasoning and `presence_penalty=0` could spend too long reasoning or revisit prior material, so the 256K profiles use `--reasoning-budget 2048`, while `-think` raises the hard sampler cap to 8192; all three use `--reasoning-preserve` and `--presence-penalty 1.5`. Request-level `reasoning_effort` is independently passed into the embedded template and can encourage shorter or longer reasoning, but it does not replace the server's hard reasoning-token cap. The 8192 value is a ceiling, not a latency-free default: consuming it fully would take about four minutes at 34 t/s, so use `low` or `medium` effort for time-sensitive work. Request sampling parameters can still override the server defaults.
+- Both downloads match their published SHA-256 values (`22200efc…a3eb3f9` for the model and `cbb841a9…0b4e43e` for the projector). The 866-tensor model retains a Q8_0 MTP projection and the required normalization tensors at `blk.64.nextn.*`. The 256K q8_0 profiles and the 128K f16 profile have the same nominal 8 GiB KV footprint and occupy roughly 24.2 GiB of the B70's 31.0 GiB exposed memory.
 - The stable alias does not enable speculation. Matched warm 256-token runs averaged 25.87 t/s normally. MTP with one, two, and three draft tokens averaged 31.13, 30.62, and 29.25 t/s respectively, so the final alias uses `--spec-type draft-mtp --spec-draft-n-max 1`. Its 351/476 acceptance rate was 73.7%, and its 20.3% speedup is the first local MTP win measured on this SYCL stack.
 - Sustained 1,024-token runs completed at 25.47 t/s baseline and 30.81 t/s MTP, with the latter accepting 464/620 drafts (74.8%). Both paths averaged 230.2 W package power and settled near 2.5 GHz under the card's power limit; unlike stalled Nemotron MTP, Qwen3.8 converts the same full power draw into higher useful throughput.
+- At approximately 16K tokens of context, the q8_0 flash-attention path fell from 26.6 t/s at empty context to 15.5 t/s. Changing only the cache to f16 restored 22.2 t/s (+43% at depth); f16 plus MTP reached 33.8 t/s with 86% draft acceptance on the recorded reasoning prompt. Combining `ngram-mod` with MTP was worse at 31.4 t/s and 68% acceptance, so it is deliberately omitted.
+- Qwen3.8 has one trained MTP block, but llama.cpp can reuse that block autoregressively to draft more than one token. Higher `--spec-draft-n-max` values are therefore not ignored; one token remains selected because the measured one-, two-, and three-token runs favored one.
+- With `--parallel 1`, llama-server can reuse a matching prompt prefix within the warm slot. This helps normal growing agent conversations, but a model swap discards that cache and changes to the serialized prefix can prevent a hit; it should not be treated as guaranteed caching across every turn.
 - Required-tool and complete tool-result round trips returned parsed `tool_calls`, separate `reasoning_content`, and a correct final answer with `reasoning_effort=low`. The F16 projector correctly identified the local llama.cpp logo, Pi returned the exact requested sentinel, and a real OpenCode run completed its `read` call and final response through the MTP alias.
 
 Agents-A1 tuning and usage notes:
@@ -118,7 +123,14 @@ For comparison, LM Studio's bundled Vulkan llama.cpp measured ~9 t/s in the hist
 
 ## llama.cpp update notes
 
-Current local build: `7e4c0a968` (`b10434`, binary build 1502), built with IntelLLVM 2026.1.1.
+Current local build: `2e92ecd02` (`b10502-9-g2e92ecd02`, binary build 1579), built with IntelLLVM 2026.1.1.
+
+### Maintenance record: 2026-08-19
+
+- Fast-forwarded the clean llama.cpp checkout by 77 commits from `7e4c0a968` to `2e92ecd02`, then rebuilt `llama-server` and `llama-bench` with the existing IntelLLVM/SYCL configuration.
+- The directly relevant upstream fixes are corrected thread/block counts for quantized SYCL copy kernels (`f275595dd`) and support for the Hadamard source hint in SYCL (`0882c7bc8`). The resulting binaries report build 1579.
+- Rechecked the current CMake cache: direct Level Zero allocation, oneDNN, FP16 kernels, SYCL graphs, host-memory fallback, and native CPU tuning remain enabled; `GGML_SYCL_DEVICE_ARCH` remains intentionally unset.
+- Added the `qwen3.8-27b-think` daily-driver profile with 128K f16 KV, one-token MTP, an 8192-token reasoning cap, and the same vision, tool-use, and sampling metadata exposed to Pi and OpenCode.
 
 ### Maintenance record: 2026-08-14
 
@@ -173,6 +185,7 @@ Notes from the rebuild:
 
 - Ubuntu package `libze-dev` is installed, so CMake enables `GGML_SYCL_SUPPORT_LEVEL_ZERO_API` and links the direct Level Zero allocation path.
 - `GGML_SYCL_F16=ON` remains enabled. Upstream recommends testing both modes because FP16 can improve prompt processing depending on the model.
+- Keep `GGML_SYCL_DEVICE_ARCH` unset for this build. The current upstream CMake logic skips `-ze-intel-greater-than-4GB-buffer-required` for `spir64_gen` AOT builds, which made the local large-model configuration unsuitable for the attempted `bmg-g21` AOT build. The normal JIT path is cached after its initial device compilation.
 - The embedded llama.cpp web UI was built from the checked-out sources with npm and linked as gzip-compressed assets. The initial UI dependency install requires network access.
 - Host validation reports `SYCL0: Intel(R) Graphics [0xe223]` with 31023 MiB and `llama-server --version` reports IntelLLVM 2026.1.1.
 
@@ -243,7 +256,8 @@ Config: `~/.config/opencode/opencode.json` — provider `local-b70`; the existin
 opencode                                     # interactive TUI, default model
 opencode -m local-b70/qwen3.6-35b-a3b        # interactive TUI, balanced Qwen MoE
 opencode -m local-b70/qwen3.8-27b             # interactive TUI, stable Qwen3.8 profile
-opencode -m local-b70/qwen3.8-27b-mtp         # interactive TUI, experimental MTP
+opencode -m local-b70/qwen3.8-27b-mtp         # interactive TUI, 256K Qwen3.8 + MTP
+opencode -m local-b70/qwen3.8-27b-think       # interactive TUI, recommended 128K agent profile
 opencode -m local-b70/agents-a1               # interactive TUI, long-horizon agent model
 opencode -m local-b70/nemotron-3.5-lightning  # interactive TUI, stable Nemotron profile
 opencode -m local-b70/nemotron-3.5-lightning-mtp # interactive TUI, experimental MTP
@@ -253,7 +267,8 @@ opencode -m local-b70/glm-4.7-flash          # interactive TUI, GLM
 opencode run "summarize this file" @file.py  # one-shot, default model
 opencode run -m local-b70/qwen3.6-35b-a3b "..." # one-shot, balanced Qwen MoE
 opencode run -m local-b70/qwen3.8-27b "..."  # one-shot, stable Qwen3.8
-opencode run -m local-b70/qwen3.8-27b-mtp "..." # one-shot, experimental MTP
+opencode run -m local-b70/qwen3.8-27b-mtp "..." # one-shot, 256K Qwen3.8 + MTP
+opencode run -m local-b70/qwen3.8-27b-think "..." # one-shot, recommended 128K agent profile
 opencode run -m local-b70/agents-a1 "..."    # one-shot, long-horizon agent model
 opencode run -m local-b70/nemotron-3.5-lightning "..." # one-shot, Nemotron
 opencode run -m local-b70/nemotron-3.5-lightning-mtp "..." # one-shot, experimental MTP
@@ -272,6 +287,7 @@ Config: `~/.pi/agent/models.json` — provider `local-b70`, all active llama-swa
 pi --provider local-b70 --model qwen3.6-35b-a3b
 pi --provider local-b70 --model qwen3.8-27b
 pi --provider local-b70 --model qwen3.8-27b-mtp
+pi --provider local-b70 --model qwen3.8-27b-think
 pi --provider local-b70 --model agents-a1
 pi --provider local-b70 --model nemotron-3.5-lightning
 pi --provider local-b70 --model nemotron-3.5-lightning-mtp
@@ -298,7 +314,16 @@ It updates:
 | Pi agent auth | `~/.pi/agent/auth.json` |
 | opencode provider and per-model context/output limits | `~/.config/opencode/opencode.json` |
 
-For both clients, context and maximum-output limits are set from each model profile's `-c` or `--ctx-size` value. Existing per-model fields are preserved; maintained metadata exposes reasoning and image input for Qwen and Muse, and explicitly enables their OpenCode tool-call capability. The command also removes the retired Qwen 27B and Nemotron IDs from old local-provider entries. Run it after adding, renaming, removing, or changing a model.
+For both clients, context and maximum-output limits are set from each model profile's `-c` or `--ctx-size` value. Existing per-model fields are preserved; maintained metadata exposes reasoning, tool use, and the appropriate text/vision modalities for Qwen, Agents-A1, Nemotron, and Muse. The command also removes the retired Qwen 27B and Nemotron IDs from old local-provider entries. Run it after adding, renaming, removing, or changing a model.
+
+The repository keeps sanitized snapshots in `configs/pi-models.json` and `configs/opencode.json`. Refresh them from the live registry before committing configuration changes:
+
+```bash
+PI_AGENT_CONFIG="$PWD/configs/pi-models.json" \
+PI_AGENT_AUTH=/tmp/local-b70-auth.json \
+OPENCODE_CONFIG="$PWD/configs/opencode.json" \
+./bin/llm-swap configure
+```
 
 ## Adding another model
 
@@ -317,12 +342,12 @@ For both clients, context and maximum-output limits are set from each model prof
 
 **Wrong-looking GPU usage in nvtop** — nvtop normalizes each GPU to its own VRAM pool. The AMD 780M iGPU showing "50 %" is just gnome-shell using ~1 GB of its 2 GB UMA share for desktop compositing. The B70 is the only thing running model weights.
 
-**Where's `icpx` / `sycl-ls`?** — `source /opt/intel/oneapi/setvars.sh` before invoking llama.cpp tools directly. The systemd unit already does this.
+**Where's `icpx` / `sycl-ls`?** — `source /opt/intel/oneapi/setvars.sh` before invoking llama.cpp tools directly. Each llama-swap model command already does this.
 
 **Things to avoid (lessons from the hard way):**
 - Ollama on Intel: `OLLAMA_VULKAN=1`, `OLLAMA_NUM_GPU=999` etc. are not real env vars — pure hallucination.
 - IPEX-LLM Docker (`intelanalytics/ipex-llm-serving-xpu`): XPU device count goes to zero inside the container on this combo. Skip.
-- OpenVINO IR conversion via `optimum-cli`: doesn't recognize bleeding-edge architectures like `qwen3_5` yet. Not worth fighting unless you have a reason.
+- The checked-in `export_qwen.py` and `serve_ov.py` files are historical prototypes from the abandoned Qwen3.6/OpenVINO path, not part of the active stack. Revalidate current library and architecture support before reviving them.
 - `kobuk-team/intel-graphics` PPA: hasn't published a Release file for `resolute`. Don't add it.
 
 ## File locations
@@ -332,8 +357,11 @@ For both clients, context and maximum-output limits are set from each model prof
 | llama.cpp build | `~/Code/intel/llama.cpp/build/bin/` |
 | llama-swap binary | `~/Code/intel/bin/llama-swap` |
 | llama-swap config | `~/Code/intel/llama-swap.yaml` |
+| Standalone Qwen3.8 thinking-profile launcher | `~/Code/intel/start_server.sh` (stop llama-swap first) |
 | systemd unit | `~/.config/systemd/user/llama-swap.service` |
 | opencode config | `~/.config/opencode/opencode.json` |
+| opencode config snapshot | `~/Code/intel/configs/opencode.json` |
 | pi config | `~/.pi/agent/models.json` |
+| pi config snapshot | `~/Code/intel/configs/pi-models.json` |
 | GGUFs | `~/.lmstudio/models/` |
 | Intel oneAPI | `/opt/intel/oneapi/` (source `setvars.sh`) |

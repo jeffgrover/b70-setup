@@ -75,6 +75,40 @@ models:
       --repeat-penalty 1.0
       --alias qwen3.8-27b-mtp"
 
+  # Tuned for long-thinking workloads (measured on 2e92ecd02 / build 1579, 2026-08-19):
+  # - f16 KV instead of q8_0: +43% decode at 16K-token depth (22.2 vs 15.5 t/s); SYCL q8_0 FA is slow at depth
+  # - 131072 ctx: f16 KV needs 64 KiB/token across 16 full-attn layers = 8 GiB (256K would need 16 GiB and not fit)
+  # - MTP spec decode: 86% acceptance, ~34 t/s vs ~27 t/s (adding ngram-mod was slower: 68% acceptance)
+  # - reasoning budget raised 2048 -> 8192 for agent work to reduce premature truncation of useful reasoning
+  qwen3.8-27b-think:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_S.gguf
+      --mmproj /home/jeff/.lmstudio/models/unsloth/Qwen3.8-27B-GGUF/mmproj-F16.gguf
+      -ngl 999
+      -c 131072
+      -ctk f16 -ctv f16
+      -fa on
+      --parallel 1
+      --metrics
+      --host 127.0.0.1 --port 9000
+      --jinja
+      --reasoning on
+      --reasoning-format deepseek
+      --reasoning-budget 8192
+      --reasoning-preserve
+      --spec-type draft-mtp
+      --spec-draft-n-max 1
+      --temp 1.0
+      --top-p 0.95
+      --top-k 20
+      --min-p 0
+      --presence-penalty 1.5
+      --repeat-penalty 1.0
+      --alias qwen3.8-27b-think"
+
   agents-a1:
     proxy: http://127.0.0.1:9000
     ttl: 600

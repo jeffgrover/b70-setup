@@ -1,3 +1,10 @@
+"""Historical Qwen3.6/OpenVINO conversion experiment.
+
+This is not used by the active llama.cpp/llama-swap stack and still targets the
+retired local Qwen3.6 source directories. Revalidate current OpenVINO and model
+support before attempting to revive it.
+"""
+
 import os
 import torch
 import openvino as ov

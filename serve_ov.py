@@ -1,3 +1,5 @@
+"""Historical OpenVINO serving prototype; not part of the active local stack."""
+
 import sys
 import openvino_genai as ov_genai
 from fastapi import FastAPI

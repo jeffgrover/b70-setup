@@ -109,6 +109,20 @@ model_metadata = {
             "supportsReasoningEffort": True,
         },
     },
+    "qwen3.8-27b-think": {
+        "name": "Qwen3.8-27B Q4_K_S (128K f16 KV, vision, MTP, thinking-tuned)",
+        "reasoning": True,
+        "input": ["text", "image"],
+        "compat": {
+            "supportsDeveloperRole": True,
+            "supportsReasoningEffort": True,
+        },
+    },
+    "agents-a1": {
+        "name": "Agents-A1 Q4_K_M (256K)",
+        "reasoning": True,
+        "input": ["text"],
+    },
     "nemotron-3.5-lightning": {
         "name": "NVIDIA Nemotron 3.5 Lightning 30B-A3B Q4_K_S (256K)",
         "reasoning": True,
@@ -123,6 +137,15 @@ model_metadata = {
         "name": "Muse Glimmer 30B K-Quant (128K, vision)",
         "reasoning": True,
         "input": ["text", "image"],
+    },
+    "gemma-4-e4b": {
+        "name": "Gemma-4 E4B Q4_K_M (128K)",
+    },
+    "gemma-4-31b-qat": {
+        "name": "Gemma-4 31B QAT Q4_0 (128K)",
+    },
+    "glm-4.7-flash": {
+        "name": "GLM-4.7-Flash Q4_K_M (128K)",
     },
 }
 

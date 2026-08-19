@@ -55,10 +55,29 @@
           }
         },
         {
+          "id": "qwen3.8-27b-think",
+          "contextWindow": 131072,
+          "maxTokens": 131072,
+          "name": "Qwen3.8-27B Q4_K_S (128K f16 KV, vision, MTP, thinking-tuned)",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "compat": {
+            "supportsDeveloperRole": true,
+            "supportsReasoningEffort": true
+          }
+        },
+        {
           "id": "agents-a1",
           "name": "Agents-A1 Q4_K_M (256K)",
           "contextWindow": 262144,
-          "maxTokens": 262144
+          "maxTokens": 262144,
+          "reasoning": true,
+          "input": [
+            "text"
+          ]
         },
         {
           "id": "nemotron-3.5-lightning",
