@@ -36,7 +36,7 @@ setsid /home/jeff/Code/intel/llama.cpp/build/bin/llama-server \
   --top-p 0.95 \
   --top-k 20 \
   --min-p 0 \
-  --presence-penalty 1.5 \
+  --presence-penalty 0 \
   --repeat-penalty 1.0 \
   --alias qwen3.8-27b-think \
   > /tmp/llama_server.log 2>&1 < /dev/null &

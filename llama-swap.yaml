@@ -42,7 +42,7 @@ models:
       --top-p 0.95
       --top-k 20
       --min-p 0
-      --presence-penalty 1.5
+      --presence-penalty 0
       --repeat-penalty 1.0
       --alias qwen3.8-27b"
 
@@ -71,7 +71,7 @@ models:
       --top-p 0.95
       --top-k 20
       --min-p 0
-      --presence-penalty 1.5
+      --presence-penalty 0
       --repeat-penalty 1.0
       --alias qwen3.8-27b-mtp"
 
@@ -80,6 +80,7 @@ models:
   # - 131072 ctx: f16 KV needs 64 KiB/token across 16 full-attn layers = 8 GiB (256K would need 16 GiB and not fit)
   # - MTP spec decode: 86% acceptance, ~34 t/s vs ~27 t/s (adding ngram-mod was slower: 68% acceptance)
   # - reasoning budget raised 2048 -> 8192 for agent work to reduce premature truncation of useful reasoning
+  # - presence penalty 0 won a seeded code-quality A/B; 1.5 exhausted 3200 tokens and returned a defective answer
   qwen3.8-27b-think:
     proxy: http://127.0.0.1:9000
     ttl: 600
@@ -105,7 +106,7 @@ models:
       --top-p 0.95
       --top-k 20
       --min-p 0
-      --presence-penalty 1.5
+      --presence-penalty 0
       --repeat-penalty 1.0
       --alias qwen3.8-27b-think"
 
