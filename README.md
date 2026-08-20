@@ -74,6 +74,7 @@ than a single-variable benchmark.
 | Pi standard, tuned `qwen3.8-27b-think` | success | 143,422 + 99,289 | 63 | approximately 1h40m service window | static/runtime clean |
 | Pi-Wiggum, baseline `qwen3.8-27b` | pass | 95,341 + 40,455 | 42 | 2h12m04s | 7/7 logic tests; no browser errors |
 | Pi-Wiggum, tuned `qwen3.8-27b-think` | pass | 161,872 + 109,356 | 60 | 1h45m17s | 7/7 logic tests; no browser errors |
+| OpenCode, tuned `qwen3.8-27b-think` | success | 715,325 + 253,739 | 121 | approximately 3h38m42s | static/runtime clean; 7/7 logic test |
 
 The tuned Wiggum run finished 20.3% faster (26m47s saved) while producing
 roughly twice as many tokens. Both runs produced the same 1,794 scene objects;
@@ -89,6 +90,14 @@ reached about 33.8 t/s with 86% draft acceptance. The practical conclusion is
 to keep `qwen3.8-27b-think` as the 128K daily agent profile, keep
 `qwen3.8-27b-mtp` for 256K contexts, and retain the non-speculative
 `qwen3.8-27b` alias as a fallback.
+
+The corrected OpenCode run used the same 131072-token client context as the
+Pi runs and produced a complete, working simulation. It passed static and
+browser-runtime checks with no errors, and its generated elevator logic passed
+an independent 7/7 test run. It was nevertheless much less efficient than Pi:
+121 turns and 969,064 total tokens over roughly 3h39m. The first OpenCode
+attempt advertised only a 32768-token context and was stopped; it is archived
+separately and is not part of this comparison.
 
 ### Choosing a model
 
