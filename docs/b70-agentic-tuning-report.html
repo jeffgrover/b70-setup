@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Intel Arc Pro B70 Agentic LLM Tuning Report</title>
+  <style>
+    @page { size: Letter; margin: 0.62in 0.65in 0.62in; }
+    :root { --ink:#172033; --muted:#586579; --blue:#1769aa; --cyan:#0c9ab8; --gold:#d88916; --green:#2f8755; --red:#a74747; --pale:#eef5fa; --line:#d7e0e8; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color:var(--ink); font-size:10.2pt; line-height:1.38; margin:0; }
+    h1 { font-size:27pt; line-height:1.05; color:#0d4775; margin:0 0 9px; }
+    h2 { color:#0d4775; border-bottom:2px solid #c8ddea; padding-bottom:4px; margin:23px 0 9px; font-size:17pt; }
+    h3 { color:#1769aa; margin:14px 0 5px; font-size:12.5pt; }
+    p { margin:5px 0 8px; }
+    ul, ol { margin:4px 0 8px 20px; padding:0; }
+    li { margin:2px 0; }
+    .cover { min-height:8.9in; display:flex; flex-direction:column; justify-content:center; page-break-after:always; }
+    .eyebrow { color:var(--cyan); text-transform:uppercase; letter-spacing:1.6px; font-size:9pt; font-weight:bold; }
+    .subtitle { font-size:15pt; color:var(--muted); max-width:6.3in; }
+    .hero { margin:28px 0; padding:18px 20px; border-left:7px solid var(--cyan); background:linear-gradient(100deg,#eaf6fb,#f7fbfd); font-size:13pt; }
+    .meta { color:var(--muted); font-size:9pt; margin-top:25px; }
+    .key-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; margin:12px 0; }
+    .key { border:1px solid var(--line); background:#f8fbfd; border-radius:5px; padding:10px; min-height:74px; }
+    .key strong { display:block; font-size:17pt; color:var(--blue); }
+    .key span { color:var(--muted); font-size:8.5pt; }
+    table { width:100%; border-collapse:collapse; margin:8px 0 12px; font-size:8.25pt; }
+    th { background:#0d4775; color:#fff; text-align:left; padding:5px 5px; font-weight:bold; }
+    td { border:1px solid var(--line); padding:5px; vertical-align:top; }
+    tr:nth-child(even) td { background:#f5f9fb; }
+    .note { background:#fff8e9; border-left:4px solid var(--gold); padding:8px 10px; margin:9px 0; }
+    .good { color:var(--green); font-weight:bold; }
+    .warn { color:var(--red); font-weight:bold; }
+    .small { color:var(--muted); font-size:8.5pt; }
+    .chart-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:10px 0 15px; }
+    .chart-card { border:1px solid var(--line); border-radius:5px; padding:7px; break-inside:avoid; }
+    .chart-card h3 { margin:2px 4px 3px; font-size:11pt; }
+    .chart-card svg { display:block; width:100%; height:auto; }
+    .chart-card.full { grid-column:1 / -1; }
+    .legend { font-size:8pt; color:var(--muted); margin:2px 4px; }
+    .two-col { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+    .callout { border:1px solid #bcd5e5; background:var(--pale); border-radius:5px; padding:10px; margin:8px 0; }
+    code { font-family:Consolas, Menlo, monospace; font-size:8.8pt; background:#f1f4f6; padding:1px 3px; border-radius:2px; }
+    pre { background:#172033; color:#edf7ff; padding:10px; border-radius:4px; font-size:8.3pt; line-height:1.35; white-space:pre-wrap; }
+    .page-break { page-break-before:always; }
+    .footer { margin-top:18px; color:var(--muted); font-size:8pt; border-top:1px solid var(--line); padding-top:5px; }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <div class="eyebrow">Field report · August 2026</div>
+    <h1>Making a 27B Agentic Model Practical on an Intel Arc Pro B70</h1>
+    <div class="subtitle">Repeated profiling, configuration tuning, and real coding-agent evaluations across Pi, Pi-Wiggum, and OpenCode.</div>
+    <div class="hero"><strong>Bottom line:</strong> the B70 became a credible local agentic coding machine. The winning Qwen3.8 profile combines f16 KV cache, one-token MTP speculation, a long reasoning ceiling, and zero presence penalty. It recovered deep-context speed and passed every behavioral check we applied.</div>
+    <div class="key-grid">
+      <div class="key"><strong>33.8 t/s</strong><span>f16 KV + MTP at ~16K depth, 86% draft acceptance</span></div>
+      <div class="key"><strong>20.3% faster</strong><span>Pi-Wiggum wall time after tuning</span></div>
+      <div class="key"><strong>98 / 100</strong><span>human score for Pi-Wiggum from the operator</span></div>
+    </div>
+    <div class="meta">Hardware: Intel Arc Pro B70 (32 GB) in a USB4 eGPU enclosure · llama.cpp SYCL/Level Zero/XMX · llama-swap · OpenAI-compatible local endpoint</div>
+  </section>
+
+  <h2>Executive summary</h2>
+  <p>The original goal was to make a large local model useful for agentic coding on a Battlemage B70 rather than merely impressive in a short benchmark. The work proceeded as a loop: update llama.cpp, rebuild against Intel oneAPI, measure context-depth behavior, test speculative decoding, test sampling choices, verify tool and vision paths, then run the same coding task through multiple agents.</p>
+  <p>The central finding was that the slow path was not the model’s raw compute. It was the SYCL quantized KV-cache flash-attention path as context grew. On Qwen3.8, q8 KV decode dropped from 26.6 t/s at an empty context to 15.5 t/s around 16K tokens. Changing only the KV cache to f16 raised that deep-context result to 22.2 t/s; adding one-token MTP reached 33.8 t/s with 86% acceptance.</p>
+  <p>The final recommendation is deliberately profile-based: use <code>qwen3.8-27b-think</code> for 128K reasoning-heavy agent work, <code>qwen3.8-27b-mtp</code> when 256K context matters more, and <code>qwen3.6-35b-a3b</code> UD-Q4_K_S as the balanced general-purpose Qwen option.</p>
+
+  <h2>Hardware and software baseline</h2>
+  <table>
+    <tr><th>Component</th><th>Observed setup</th><th>Why it mattered</th></tr>
+    <tr><td>GPU</td><td>Intel Arc Pro B70, Battlemage, 32 GB GDDR6; ~31,023 MiB exposed</td><td>Large enough for 27–35B Q4 models and meaningful KV-cache experiments.</td></tr>
+    <tr><td>Transport</td><td>USB4 eGPU enclosure</td><td>Cold model loads are tens of seconds; warm inference is primarily a GPU bandwidth problem.</td></tr>
+    <tr><td>Backend</td><td>llama.cpp SYCL → Level Zero → XMX, oneDNN flash attention, host-memory fallback</td><td>Uses Intel hardware acceleration instead of the much slower Vulkan path.</td></tr>
+    <tr><td>Refresh</td><td>llama.cpp <code>7e4c0a9 → 2e92ecd02</code>, binary build 1579</td><td>Included quantized SYCL copy-kernel corrections and Hadamard-hint support, along with the preceding Gated DeltaNet/MTP work.</td></tr>
+    <tr><td>Build policy</td><td>IntelLLVM 2026.1.1; <code>GGML_SYCL_DEVICE_ARCH</code> intentionally unset</td><td>JIT avoids the large-buffer limitation encountered with the attempted AOT BMG target; the compiled kernels cache after first use.</td></tr>
+  </table>
+
+  <h2>What repeated profiling taught us</h2>
+  <table>
+    <tr><th>Experiment</th><th>Observation</th><th>Decision</th></tr>
+    <tr><td>KV precision at depth</td><td>q8: 26.6 t/s empty → 15.5 t/s at ~16K; f16: 22.2 t/s at depth (+43%).</td><td>Spend the cache budget on f16 KV for the 128K thinking profile.</td></tr>
+    <tr><td>MTP draft length</td><td>One draft token beat two and three in matched runs; one-token f16 MTP reached 33.8 t/s and 86% acceptance.</td><td>Keep <code>--spec-type draft-mtp --spec-draft-n-max 1</code>.</td></tr>
+    <tr><td>n-gram drafter</td><td>Combined MTP + ngram-mod fell to 31.4 t/s with 68% acceptance.</td><td>Do not enable it on this SYCL stack.</td></tr>
+    <tr><td>Presence penalty A/B</td><td>0 completed the seeded code task in 2,733 tokens; 0.5 omitted an edge-case test; 1.5 exhausted the cap and returned defective code.</td><td>Use <code>--presence-penalty 0</code> for Qwen3.8.</td></tr>
+    <tr><td>Reasoning control</td><td><code>reasoning_effort=low</code> was the verified short-reasoning setting. <code>none</code> consumed its allowance in hidden reasoning and returned no final answer.</td><td>Use low/medium for latency-sensitive work; keep the server ceiling as a safety bound.</td></tr>
+    <tr><td>Prompt processing</td><td>About 844 t/s at 512 tokens, but tiny uncached prompts can be ~67 t/s because of per-call/USB4 overhead.</td><td>Keep <code>--parallel 1</code> and let warm prompt caching help growing agent conversations.</td></tr>
+  </table>
+
+  <h2>Model configuration that won</h2>
+  <table>
+    <tr><th>Alias</th><th>Model / quant</th><th>Context and cache</th><th>Role</th></tr>
+    <tr><td><code>qwen3.8-27b-think</code></td><td>Unsloth Qwen3.8-27B Q4_K_S with F16 projector and MTP tensors</td><td>131,072; f16 KV; MTP n=1; reasoning budget 8,192</td><td><strong>Daily agentic driver</strong> for Pi/OpenCode and long reasoning.</td></tr>
+    <tr><td><code>qwen3.8-27b-mtp</code></td><td>Same GGUF</td><td>262,144; q8 KV; MTP n=1; reasoning budget 2,048</td><td>256K-context option; less attractive at deep context.</td></tr>
+    <tr><td><code>qwen3.8-27b</code></td><td>Same GGUF</td><td>262,144; q8 KV; no speculation</td><td>Conservative non-speculative fallback.</td></tr>
+    <tr><td><code>qwen3.6-35b-a3b</code></td><td>Unsloth UD-Q4_K_S MoE + F32 projector</td><td>262,144; q8 KV</td><td>Balanced general-purpose Qwen; ~55 t/s short tool-call test.</td></tr>
+  </table>
+  <div class="callout"><strong>Important memory trade-off:</strong> the Qwen3.8 hybrid model has only 16 full-attention layers, but f16 KV still costs about 64 KiB per token. That is roughly 8 GiB at 128K and 16 GiB at 256K. The B70 can afford 128K f16 KV beside the weights, but 256K f16 KV is not practical.</div>
+
+  <h2>Agentic client comparison</h2>
+  <p>These are end-to-end task runs using the same office simulation prompt. The baseline used the older <code>qwen3.8-27b</code> profile; the tuned run used <code>qwen3.8-27b-think</code>. The comparison therefore measures the practical profile change, not one isolated flag.</p>
+  <table>
+    <tr><th>Client</th><th>Baseline</th><th>Tuned / corrected run</th><th>Measured outcome</th><th>Human score</th></tr>
+    <tr><td><strong>Pi</strong></td><td>214,639 input + 155,999 output; 102 turns. Wall time not persisted.</td><td>143,422 + 99,289; 63 turns; ~1h40m service window.</td><td>Both static/runtime clean. Tuned run used 34.5% fewer total tokens and 38.2% fewer turns.</td><td><strong>85 / 100</strong></td></tr>
+    <tr><td><strong>Pi-Wiggum</strong></td><td>95,341 + 40,455; 42 turns; 7,924.398 s.</td><td>161,872 + 109,356; 60 turns; 6,317.143 s.</td><td>Both passed 7/7 logic tests. Tuned run was 20.3% faster despite roughly twice the tokens.</td><td><strong>98 / 100</strong></td></tr>
+    <tr><td><strong>OpenCode</strong></td><td>First 32K-context attempt was stopped and archived; not a valid baseline.</td><td>715,325 + 253,739; 121 turns; 132 tool calls; ~3h38m42s; 131K context.</td><td>Static/runtime clean; independent elevator logic test 7/7. Complete working solution, but much more meandering.</td><td><strong>80 / 100</strong></td></tr>
+  </table>
+
+  <div class="chart-grid">
+    <div class="chart-card">
+      <h3>Pi · total tokens</h3>
+      <svg viewBox="0 0 330 175" role="img" aria-label="Pi baseline and tuned total token bars">
+        <line x1="42" y1="142" x2="315" y2="142" stroke="#8796a5"/><line x1="42" y1="20" x2="42" y2="142" stroke="#8796a5"/>
+        <text x="4" y="25" fill="#586579" font-size="9">400k</text><text x="9" y="147" fill="#586579" font-size="9">0</text>
+        <rect x="83" y="28" width="64" height="114" fill="#8fb9d2"/><rect x="205" y="68" width="64" height="74" fill="#1769aa"/>
+        <text x="86" y="23" fill="#172033" font-size="9">370.6k</text><text x="208" y="63" fill="#172033" font-size="9">242.7k</text>
+        <text x="82" y="158" fill="#172033" font-size="10">before</text><text x="208" y="158" fill="#172033" font-size="10">tuned</text>
+        <text x="210" y="173" fill="#586579" font-size="9">human: 85/100</text>
+      </svg>
+      <div class="legend">Tuned Pi needed 34.5% fewer total tokens and 38.2% fewer turns.</div>
+    </div>
+    <div class="chart-card">
+      <h3>Pi-Wiggum · wall time</h3>
+      <svg viewBox="0 0 330 175" role="img" aria-label="Pi-Wiggum baseline and tuned wall time bars">
+        <line x1="42" y1="142" x2="315" y2="142" stroke="#8796a5"/><line x1="42" y1="20" x2="42" y2="142" stroke="#8796a5"/>
+        <text x="6" y="25" fill="#586579" font-size="9">2.5h</text><text x="9" y="147" fill="#586579" font-size="9">0</text>
+        <rect x="83" y="35" width="64" height="107" fill="#8fb9d2"/><rect x="205" y="69" width="64" height="73" fill="#2f8755"/>
+        <text x="87" y="30" fill="#172033" font-size="9">2.20h</text><text x="209" y="64" fill="#172033" font-size="9">1.75h</text>
+        <text x="82" y="158" fill="#172033" font-size="10">before</text><text x="208" y="158" fill="#172033" font-size="10">tuned</text>
+        <text x="210" y="173" fill="#586579" font-size="9">human: 98/100</text>
+      </svg>
+      <div class="legend">The tuned run saved 26m47s, a 20.3% wall-time improvement.</div>
+    </div>
+    <div class="chart-card full">
+      <h3>OpenCode · corrected full-context run</h3>
+      <svg viewBox="0 0 680 165" role="img" aria-label="OpenCode corrected run summary chart">
+        <line x1="50" y1="132" x2="650" y2="132" stroke="#8796a5"/><line x1="50" y1="18" x2="50" y2="132" stroke="#8796a5"/>
+        <text x="4" y="23" fill="#586579" font-size="9">1.0M</text><text x="18" y="137" fill="#586579" font-size="9">0</text>
+        <rect x="120" y="22" width="95" height="110" fill="#d88916"/><text x="129" y="17" fill="#172033" font-size="10">969k tokens</text>
+        <rect x="292" y="71" width="95" height="61" fill="#1769aa"/><text x="301" y="66" fill="#172033" font-size="10">121 turns</text>
+        <rect x="464" y="49" width="95" height="83" fill="#a74747"/><text x="480" y="44" fill="#172033" font-size="10">80 / 100</text>
+        <text x="132" y="149" fill="#172033" font-size="10">total tokens</text><text x="316" y="149" fill="#172033" font-size="10">turns</text><text x="486" y="149" fill="#172033" font-size="10">human score</text>
+      </svg>
+      <div class="legend">No valid before bar is shown: the first attempt advertised only 32K context and was stopped before producing a result.</div>
+    </div>
+  </div>
+
+  <h2>Best operating procedure</h2>
+  <ol>
+    <li>Keep <code>llama-swap.service</code> as the single model switchboard and expose the OpenAI-compatible endpoint at <code>http://127.0.0.1:8080/v1</code>.</li>
+    <li>For Pi or OpenCode agentic coding, select <code>qwen3.8-27b-think</code>. Keep the client context limit aligned with the server: 131,072 for this profile. OpenCode evaluation required an explicit <code>--lms-context-length 131072</code> override.</li>
+    <li>Keep <code>--ctk f16 --ctv f16</code>, flash attention, <code>--parallel 1</code>, MTP draft length 1, reasoning budget 8192, and presence penalty 0.</li>
+    <li>Use request-level <code>reasoning_effort=low</code> for routine coding and <code>medium</code>/<code>xhigh</code> only when the task justifies longer reasoning. Avoid <code>none</code> as a shortcut.</li>
+    <li>Use <code>qwen3.8-27b-mtp</code> for a real 256K-context requirement, accepting the q8-KV deep-context penalty. Use the non-MTP alias when speculative behavior is undesirable.</li>
+    <li>Keep the Unsloth Qwen3.6 UD quant for balanced general-purpose work, and use smaller Gemma for quick transformations. Agents-A1 remains the high-throughput long-horizon alternative; Muse Glimmer remains useful for multimodal ATEM tool work.</li>
+    <li>After changing a model alias or context, run <code>~/Code/intel/bin/llm-swap configure</code> so Pi and OpenCode receive the same model list, modalities, context, and output limits.</li>
+  </ol>
+  <pre>systemctl --user restart llama-swap.service
+~/Code/intel/bin/llm-swap configure
+opencode -m local-b70/qwen3.8-27b-think
+pi --provider local-b70 --model qwen3.8-27b-think</pre>
+
+  <h2>What to keep, what to avoid</h2>
+  <div class="two-col">
+    <div>
+      <h3 class="good">Keep</h3>
+      <ul>
+        <li>Current llama.cpp refresh and IntelLLVM/SYCL build.</li>
+        <li>Level Zero, oneDNN, FP16 kernels, host-memory fallback, flash attention.</li>
+        <li>JIT device compilation with <code>GGML_SYCL_DEVICE_ARCH</code> unset.</li>
+        <li>One-token MTP for Qwen3.8; f16 KV for deep-context agents.</li>
+        <li>Prompt caching with one serialized agent slot.</li>
+      </ul>
+    </div>
+    <div>
+      <h3 class="warn">Avoid or treat as experimental</h3>
+      <ul>
+        <li>Qwen3.8 q8 KV for deep 128K reasoning when latency matters.</li>
+        <li>ngram-mod on this SYCL backend.</li>
+        <li>Nemotron MTP as a default; it regressed and could stall on longer work.</li>
+        <li>AOT BMG architecture flags that remove the >4 GB buffer path.</li>
+        <li>Removing the DPC++ compiler/shared development packages if rebuilds are expected. Eclipse plugins and some CCL/debugger extras are not runtime requirements, but the compiler/toolchain is.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>Limitations and interpretation</h2>
+  <ul>
+    <li>The before/after runs compare the older qwen3.8-27b profile with the tuned qwen3.8-27b-think profile. They are practical end-to-end comparisons, not single-variable laboratory controls.</li>
+    <li>The Pi baseline’s exact wall time was not persisted, and the long-run harness did not retain separate prompt-processing and generation rates. Short controlled llama-server measurements remain the authoritative throughput data.</li>
+    <li>The automated browser probes establish load, animation, canvas, and error-free execution; they do not fully judge visual or behavioral quality. The human scores supplied for this report are therefore valuable complementary evidence.</li>
+    <li>The first OpenCode run was invalid for apples-to-apples comparison because it advertised 32K context. It was stopped, checkpointed, and excluded from the final performance table.</li>
+  </ul>
+
+  <div class="callout"><strong>Conclusion:</strong> profiling changed the recommendation from “run the largest model that fits” to “match cache precision and context to the workload.” On this hardware, that distinction is worth the difference between a model that feels sluggish at depth and one that can complete a long agentic coding task reliably.</div>
+  <div class="footer">Prepared from the local Intel Arc Pro B70 measurements, llama-swap configuration, llama.cpp build notes, and archived Pi/Pi-Wiggum/OpenCode evaluations. Human client scores: Pi 85, Pi-Wiggum 98, OpenCode 80.</div>
+</body>
+</html>

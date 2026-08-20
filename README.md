@@ -2,6 +2,8 @@
 
 Single-port OpenAI-compatible chat-completions endpoint at `http://127.0.0.1:8080/v1`, backed by `llama.cpp` (SYCL/Level-Zero → XMX) and fronted by `llama-swap` for transparent model switching. Used by `opencode` and `pi`.
 
+See the [B70 agentic LLM tuning report](docs/b70-agentic-tuning-report.pdf) for the complete profiling history, before/after client comparison, charts, subjective scores, and recommended operating procedure. The self-contained [HTML source](docs/b70-agentic-tuning-report.html) is included alongside the PDF.
+
 ## Hardware & OS
 
 | | |
