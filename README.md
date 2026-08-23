@@ -292,6 +292,26 @@ Status endpoints:
 
 These interfaces do not provide Intel GPU utilization, temperature, power, or complete VRAM telemetry. Use `nvtop` interactively for the B70 telemetry it exposes; package-energy counters are available under `/sys/class/drm/card0/device/hwmon/hwmon*/energy*_input`. The installed `intel_gpu_top` does not support the `xe` driver, and `xpu-smi` is not installed.
 
+## Terminal monitor
+
+`scripts/llama_monitor.py` is a dependency-free terminal dashboard for the active llama-swap/llama-server pair. It shows model and service health, idle/prompt/generation state, prompt and generation throughput, cumulative token totals, the current inference request, recent completed requests, and recent monitor errors.
+
+Run it from the repository root:
+
+```bash
+scripts/llama_monitor.py
+```
+
+Useful options:
+
+```bash
+scripts/llama_monitor.py --interval 0.5  # refresh twice per second
+scripts/llama_monitor.py --once           # print one snapshot and exit
+scripts/llama_monitor.py --no-color       # plain terminal output
+```
+
+The server totals cover the current `llama-server` process and reset when the model is restarted or swapped. A “turn” is one llama-server inference request; an agent harness may create several requests for one user message. Throughput is calculated from live slot/counter changes when available and otherwise retains the last positive rate observed.
+
 ## Using opencode
 
 Config: `~/.config/opencode/opencode.json` — provider `local-b70`; the existing default model selection is preserved when the provider list is regenerated.
