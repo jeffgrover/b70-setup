@@ -61,6 +61,56 @@ GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stack
 | Gemma-4 31B QAT Q4_0 | 283.8 t/s | 10.9 t/s |
 | GLM-4.7-Flash Q4_K_M | 496.2 t/s | 20.4 t/s |
 
+### LocalAI comparison (2026-08-29)
+
+[LocalAI](https://localai.io/) was tested as an alternative OpenAI-compatible
+server using the same Qwen3.8-27B Q4_K_S GGUF and a matched long-context
+profile. The LocalAI container used the Intel SYCL llama.cpp backend with
+131,072-token context, f16 KV, flash attention, one slot, full GPU offload,
+and one-token MTP speculation. This corrected an earlier non-equivalent test
+that used 8,192 context, four-way parallelism, automatic flash attention, and
+q8 KV.
+
+| Test | Tuned llama.cpp baseline | Matched LocalAI | Difference |
+|---|---:|---:|---:|
+| Prompt processing, ~512–700 tokens | 836.5 t/s | 457.2 t/s | ~45% slower |
+| Prompt processing, ~2K tokens | 864.7 t/s | 643.3 t/s | ~26% slower |
+| Warm generation | 33.8 t/s | 32.1 t/s | ~5% slower |
+| ~14K-token depth generation | 33.8 t/s | 31.7 t/s | ~6% slower |
+
+The matched LocalAI requests completed successfully with the full 131,072-token
+context configured. MTP acceptance was 95.7% (89/93) on a short coding
+explanation and 100% (7/7) on the deliberately repetitive long-prompt
+control; acceptance is prompt-dependent. Measured LocalAI wall times were
+7.84 s for 58 prompt + 234 output tokens, 3.32 s for the ~1.9K-token prompt
+case, and 19.84 s for the ~13.8K-token depth case (including API overhead).
+
+The custom server remains the performance reference, particularly for prompt
+ingestion. LocalAI is a practical compatibility/UI alternative: its matched
+generation rate is within a few percent, while prompt processing is slower,
+especially for shorter requests. These are not identical binaries—the LocalAI
+container supplies its own llama.cpp backend and adds a gRPC/API layer—so the
+figures should be treated as an operational comparison rather than a kernel
+microbenchmark. The temporary reproducible profile was exposed as
+`qwen3.8-27b-tuned` on LocalAI port 8081; it was not added to this repository's
+llama-swap registry.
+
+To repeat the LocalAI test, run [`localai.sh`](localai.sh) from this
+repository. It starts the Intel GPU container on port 8081 so the normal
+llama-swap service can continue using port 8080. The script bind-mounts the
+Qwen model directory from LM Studio to `/models` inside the container; set
+`LOCALAI_MODEL_DIR` and/or `LOCALAI_PORT` to override those defaults.
+
+The repository's `models` symlink (intentionally gitignored) is only a local
+convenience pointer to `~/.lmstudio/models`; model weights are not copied into
+this repository. LocalAI discovers GGUFs and adjacent YAML model definitions
+under the mounted `/models` directory at startup. For the matched run, the
+`qwen3.8-27b-tuned.yaml` profile was placed beside the GGUF, with
+`parameters.model` set to the GGUF filename, and the container was restarted
+so the alias appeared in `/v1/models`. The UI import field expects a URL or a
+path visible inside the container; a host path or an unresolved `/models/...`
+reference can therefore report “file does not exist.”
+
 ### Agentic evaluation: Qwen3.8 before and after tuning
 
 On 2026-08-19, the same office/elevator tasks were rerun through the real
@@ -167,7 +217,15 @@ For comparison, LM Studio's bundled Vulkan llama.cpp measured ~9 t/s in the hist
 
 ## llama.cpp update notes
 
-Current local build: `2e92ecd02` (`b10502-9-g2e92ecd02`, binary build 1579), built with IntelLLVM 2026.1.1.
+Current local build: `c841aeeb8` (`b10687`, binary build 1755), built with IntelLLVM 2026.1.1.
+
+### Maintenance record: 2026-08-29
+
+- Fast-forwarded the clean llama.cpp checkout from `2e92ecd02` (`b10502-9-g2e92ecd02`) to `c841aeeb8` (`b10687`) and rebuilt `llama-server`, `llama-bench`, and `test-backend-ops` with the existing IntelLLVM/SYCL configuration.
+- The directly relevant B70 changes are the Xe2/Battlemage TILE kernel selection for quantized-KV decode (`d077b4c21`), in-place f16 KV binding for oneDNN SDPA (`be876204a`), and more accurate peak-memory accounting for `--fit`/`--fit-target` (`cc83d7b48`). These should improve the 256K q8 KV profiles and reduce temporary f16-KV traffic; the 128K f16 `qwen3.8-27b-think` profile remains valid.
+- Upstream now disables automatic selection of unfused GDN/LID paths (`866322481`), so Qwen3.8's fused hybrid-attention kernels are preferred without a launcher change. Q2_K reordered SYCL kernels were restored, and unsupported TQ2_0 operations are explicitly rejected rather than risking an invalid device path.
+- No model aliases or sampler settings needed changing. Keep `--spec-draft-n-max 1`, `--ctk/--ctv f16` for the 128K thinking profile, and `GGML_SYCL_DEVICE_ARCH` unset for the large-model JIT path. The new `--fit on --fit-target <MiB>` behavior is useful for exploratory memory fitting, but fixed contexts remain preferable for reproducible agent runs until re-profiled.
+- CMake was reconfigured after sourcing `/opt/intel/oneapi/setvars.sh`; the cache still enables direct Level Zero allocation, oneDNN, FP16 kernels, SYCL graphs, host-memory fallback, and native CPU tuning. Focused post-build tests (Qwen3.5 tokenizer, reasoning budget, and C++/Python Jinja) passed 4/4 on this host.
 
 ### Maintenance record: 2026-08-19
 
