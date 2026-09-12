@@ -66,7 +66,7 @@ models:
       --reasoning-budget 2048
       --reasoning-preserve
       --spec-type draft-mtp
-      --spec-draft-n-max 1
+      --spec-draft-n-max 3
       --temp 1.0
       --top-p 0.95
       --top-k 20
@@ -75,10 +75,11 @@ models:
       --repeat-penalty 1.0
       --alias qwen3.8-27b-mtp"
 
-  # Tuned for long-thinking workloads (measured on 2e92ecd02 / build 1579, 2026-08-19):
+  # Tuned for long-thinking workloads (measured on 3057bb66c / build 1999, 2026-09-12):
   # - f16 KV instead of q8_0: +43% decode at 16K-token depth (22.2 vs 15.5 t/s); SYCL q8_0 FA is slow at depth
   # - 131072 ctx: f16 KV needs 64 KiB/token across 16 full-attn layers = 8 GiB (256K would need 16 GiB and not fit)
-  # - MTP spec decode: 86% acceptance, ~34 t/s vs ~27 t/s (adding ngram-mod was slower: 68% acceptance)
+  # - MTP spec decode: three draft tokens measured 47.1 t/s at 82.6% acceptance on a fixed 128-token control;
+  #   one token measured 37.9 t/s, while four tokens fell back to 45.9 t/s
   # - reasoning budget raised 2048 -> 8192 for agent work to reduce premature truncation of useful reasoning
   # - presence penalty 0 won a seeded code-quality A/B; 1.5 exhausted 3200 tokens and returned a defective answer
   qwen3.8-27b-think:
@@ -101,7 +102,7 @@ models:
       --reasoning-budget 8192
       --reasoning-preserve
       --spec-type draft-mtp
-      --spec-draft-n-max 1
+      --spec-draft-n-max 3
       --temp 1.0
       --top-p 0.95
       --top-k 20

@@ -31,7 +31,7 @@ setsid /home/jeff/Code/intel/llama.cpp/build/bin/llama-server \
   --reasoning-budget 8192 \
   --reasoning-preserve \
   --spec-type draft-mtp \
-  --spec-draft-n-max 1 \
+  --spec-draft-n-max 3 \
   --temp 1.0 \
   --top-p 0.95 \
   --top-k 20 \
