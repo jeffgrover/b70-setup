@@ -22,6 +22,7 @@ setsid /home/jeff/Code/intel/llama.cpp/build/bin/llama-server \
   -c 131072 \
   -ctk f16 -ctv f16 \
   -fa on \
+  -b 4096 -ub 1024 \
   --parallel 1 \
   --metrics \
   --host 127.0.0.1 --port 8080 \
@@ -31,7 +32,7 @@ setsid /home/jeff/Code/intel/llama.cpp/build/bin/llama-server \
   --reasoning-budget 8192 \
   --reasoning-preserve \
   --spec-type draft-mtp \
-  --spec-draft-n-max 3 \
+  --spec-draft-n-max 2 \
   --temp 1.0 \
   --top-p 0.95 \
   --top-k 20 \

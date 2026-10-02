@@ -30,6 +30,7 @@ models:
       -c 262144
       -ctk q8_0 -ctv q8_0
       -fa on
+      -b 4096 -ub 1024
       --parallel 1
       --metrics
       --host 127.0.0.1 --port 9000
@@ -46,6 +47,8 @@ models:
       --repeat-penalty 1.0
       --alias qwen3.8-27b"
 
+  # 2026-10-02 real-text sweep: one/two drafts were nearly tied with q8 KV;
+  # one was more consistent on reasoning. Keep 256K context and the original sampler.
   qwen3.8-27b-mtp:
     proxy: http://127.0.0.1:9000
     ttl: 600
@@ -57,6 +60,7 @@ models:
       -c 262144
       -ctk q8_0 -ctv q8_0
       -fa on
+      -b 4096 -ub 1024
       --parallel 1
       --metrics
       --host 127.0.0.1 --port 9000
@@ -66,7 +70,7 @@ models:
       --reasoning-budget 2048
       --reasoning-preserve
       --spec-type draft-mtp
-      --spec-draft-n-max 3
+      --spec-draft-n-max 1
       --temp 1.0
       --top-p 0.95
       --top-k 20
@@ -75,11 +79,12 @@ models:
       --repeat-penalty 1.0
       --alias qwen3.8-27b-mtp"
 
-  # Tuned for long-thinking workloads (measured on 3057bb66c / build 1999, 2026-09-12):
-  # - f16 KV instead of q8_0: +43% decode at 16K-token depth (22.2 vs 15.5 t/s); SYCL q8_0 FA is slow at depth
-  # - 131072 ctx: f16 KV needs 64 KiB/token across 16 full-attn layers = 8 GiB (256K would need 16 GiB and not fit)
-  # - MTP spec decode: three draft tokens measured 47.1 t/s at 82.6% acceptance on a fixed 128-token control;
-  #   one token measured 37.9 t/s, while four tokens fell back to 45.9 t/s
+  # Refreshed on 5fc4f3c8c / build 2415, 2026-10-02; full report: docs/benchmarks/2026-10-01/README.md
+  # - f16 KV: ~20% faster decode at 64K depth (14.98 vs 12.42 t/s); the historical +43% at 16K is not current
+  # - 131072 ctx: main f16 KV needs 64 KiB/token = 8 GiB (256K would need 16 GiB and not fit)
+  # - 4096/1024 batching improved pp8K ~23% and pp64K ~18%; retain normal oneDNN attention dispatch
+  # - Two MTP drafts averaged 30.96 t/s on 5.5K-input / 512-output real-text controls vs 27.84 with three;
+  #   one was close at 30.29. This is bounded throughput, not a complete-task quality/agent-session score
   # - reasoning budget raised 2048 -> 8192 for agent work to reduce premature truncation of useful reasoning
   # - presence penalty 0 won a seeded code-quality A/B; 1.5 exhausted 3200 tokens and returned a defective answer
   qwen3.8-27b-think:
@@ -93,6 +98,7 @@ models:
       -c 131072
       -ctk f16 -ctv f16
       -fa on
+      -b 4096 -ub 1024
       --parallel 1
       --metrics
       --host 127.0.0.1 --port 9000
@@ -102,7 +108,7 @@ models:
       --reasoning-budget 8192
       --reasoning-preserve
       --spec-type draft-mtp
-      --spec-draft-n-max 3
+      --spec-draft-n-max 2
       --temp 1.0
       --top-p 0.95
       --top-k 20
@@ -111,6 +117,7 @@ models:
       --repeat-penalty 1.0
       --alias qwen3.8-27b-think"
 
+  # 2026-10-02: larger batching improved pp8K ~34% and pp64K ~28%; sampler/KV/context unchanged.
   agents-a1:
     proxy: http://127.0.0.1:9000
     ttl: 600
@@ -121,6 +128,7 @@ models:
       -c 262144
       -ctk f16 -ctv f16
       -fa on
+      -b 4096 -ub 1024
       --parallel 1
       --metrics
       --host 127.0.0.1 --port 9000

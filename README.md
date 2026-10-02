@@ -2,7 +2,9 @@
 
 Single-port OpenAI-compatible chat-completions endpoint at `http://127.0.0.1:8080/v1`, backed by `llama.cpp` (SYCL/Level-Zero → XMX) and fronted by `llama-swap` for transparent model switching. Used by `opencode` and `pi`.
 
-See the [B70 agentic LLM tuning report](docs/b70-agentic-tuning-report.pdf) for the complete profiling history, before/after client comparison, charts, subjective scores, and recommended operating procedure. The self-contained [HTML source](docs/b70-agentic-tuning-report.html) is included alongside the PDF.
+See the [B70 agentic LLM tuning report](docs/b70-agentic-tuning-report.pdf) for the earlier profiling history, before/after client comparison, charts, subjective scores, and recommended operating procedure. The self-contained [HTML source](docs/b70-agentic-tuning-report.html) is included alongside the PDF.
+
+The latest [October 1–2 SYCL update and tuning pass](docs/benchmarks/2026-10-01/README.md) includes paired old/new measurements, real-text MTP sweeps, near-limit memory checks, raw results, and rollback instructions. Larger batching improved measured prompt processing by 18–34%; the updated thinking profile reduced bounded warm request time by about 13%. Source-only default-setting gains were generally about 1%, not the much larger upstream MKL percentages.
 
 ## Hardware & OS
 
@@ -31,13 +33,13 @@ Only one llama-server runs at a time. First request to a different model trigger
 
 ## Models
 
-| Model | Path | Quant | Context | VRAM |
+| Model | Path | Quant | Context | Recorded VRAM |
 |---|---|---|---|---|
 | `qwen3.6-35b-a3b` | `~/.lmstudio/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_S.gguf` + `mmproj-F32.gguf` | UD-Q4_K_S | 256 K (q8_0 KV) | ~24.3 GB |
 | `qwen3.8-27b` | `~/.lmstudio/models/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_S.gguf` + `mmproj-F16.gguf` | Q4_K_S | 256 K (q8_0 KV) | ~24.2 GiB (78%) |
-| `qwen3.8-27b-mtp` | Same MTP-preserving GGUF + projector | Q4_K_S + MTP | 256 K (q8_0 KV) | ~24.2 GiB (78%) |
-| `qwen3.8-27b-think` | Same MTP-preserving GGUF + projector | Q4_K_S + MTP | 128 K (f16 KV) | ~24.2 GiB (same KV footprint) |
-| `agents-a1` | `~/.lmstudio/models/InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~25.1 GiB |
+| `qwen3.8-27b-mtp` | Same MTP-preserving GGUF + projector | Q4_K_S + MTP | 256 K (q8_0 KV) | ~28.5 GiB (October text stress) |
+| `qwen3.8-27b-think` | Same MTP-preserving GGUF + projector | Q4_K_S + MTP | 128 K (f16 KV) | ~26.2 GiB (October text stress) |
+| `agents-a1` | `~/.lmstudio/models/InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~25.7 GiB (October text stress) |
 | `nemotron-3.5-lightning` | `~/.lmstudio/models/bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_K_S.gguf` | Q4_K_S | 256 K (f16 KV) | ~24.3 GB |
 | `nemotron-3.5-lightning-mtp` | Same MTP-preserving GGUF | Q4_K_S + MTP | 256 K (f16 KV) | ~24.3 GB |
 | `muse-glimmer-30b` | `~/.lmstudio/models/lmstudio-community/Muse-Glimmer-30B-GGUF/muse-glimmer-30B-kquant-17gb.gguf` + `mmproj-kquant.gguf` | K-Quant-17GB | 128 K (q8_0 KV) | ~18.6 GB |
@@ -45,9 +47,41 @@ Only one llama-server runs at a time. First request to a different model trigger
 | `gemma-4-31b-qat` | `~/.lmstudio/models/lmstudio-community/gemma-4-31B-it-QAT-GGUF/gemma-4-31B-it-QAT-Q4_0.gguf` | Q4_0 QAT | 128 K (q8_0 KV) | ~20 GB |
 | `glm-4.7-flash` | `~/.lmstudio/models/lmstudio-community/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q4_K_M.gguf` | Q4_K_M | 128 K (q8_0 KV) | ~19 GB |
 
+October VRAM entries report whole-device usage before cleanup in near-limit text checks, including driver/background allocations; the other entries are earlier observations under different workloads. None is a peak guarantee. End-of-run free memory was about 5.7 GiB for Qwen f16/MTP, 3.4 GiB for Qwen q8/MTP, and 6.2 GiB for Agents-A1. Qwen projectors were loaded, but image/video stress was not tested.
+
 GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stacks coexist.
 
 ### Measured performance
+
+#### Latest paired and tuned measurements: 2026-10-01–02
+
+Candidate build `5fc4f3c8c` / 2415, normal oneDNN attention dispatch, full GPU offload, flash attention, and one slot. Prompt columns use the tuned `-b 4096 -ub 1024`; gains compare against the same candidate at 2048/512. The decode column is a separate, non-MTP control generating 128 tokens at 64,000-token KV depth with 2048/512 batching. All rates are tokens/second.
+
+| Model / KV | Prompt, 8,192 tokens | Prompt, 64,000 tokens | Batch gain, 8K / 64K | Decode at 64K depth |
+|---|---:|---:|---:|---:|
+| Qwen3.8-27B Q4_K_S / q8_0 | 1068.64 | 862.32 | +23.6% / +18.4% | 12.42 |
+| Qwen3.8-27B Q4_K_S / f16 | 1071.18 | 863.52 | +23.2% / +17.8% | 14.98 |
+| Agents-A1 Q4_K_M / f16 | 1423.96 | 1188.52 | +34.2% / +27.8% | 61.62 |
+
+The old build also benefits from larger batches. With settings held unchanged, source-only prompt gains were generally 0–1.4%, and decoding was mostly unchanged; do not attribute the larger batching gains to the new source alone. At 64K depth, Qwen f16 decoded about 20% faster than q8_0.
+
+The real-text MTP sweep used the production Qwen profiles, three workloads with 5,522–5,542 input tokens, and two measured 512-token outputs per workload after discarded warmups. Prompt reuse was disabled. These are six-sample means on warm, already-loaded servers, not model-swap latency or full agent-task results.
+
+| Profile | Batch / microbatch | Maximum MTP drafts | Generation t/s | Warm request seconds |
+|---|---:|---:|---:|---:|
+| Old f16 thinking, build 1999 | 2048 / 512 | 3 | 27.59 | 26.02 |
+| Current f16 thinking, build 2415 | 4096 / 1024 | 2 | 30.96 | 22.60 |
+| Current q8 MTP, build 2415 | 4096 / 1024 | 1 | 29.05 | 23.65 |
+
+The selected f16 combination improves mean generation by about 12% and lowers warm request time by about 13% versus the old configuration. This combines build, batch, and draft-horizon changes. On the candidate, f16 with three drafts averaged 27.84 t/s; q8 with two averaged 28.78 t/s, nearly tied with one. Horizons remain workload-dependent; four drafts were slower than non-speculative decoding on both cache types.
+
+Current tuning is `-b 4096 -ub 1024` for `qwen3.8-27b`, `qwen3.8-27b-mtp`, `qwen3.8-27b-think`, and `agents-a1`; MTP draft limits are one for q8 and two for f16. Sampling, reasoning budgets, cache precision, context limits, and aliases are unchanged. Larger batches chiefly help long uncached prompt ingestion and increase working-buffer demand. Keep normal oneDNN dispatch, runtime graphs disabled, polling unchanged, and `--parallel 1`.
+
+Near-limit 128K/256K text memory checks and seven profiles' proxy tool round trips passed. They do not establish image/video headroom, complete-answer quality, full-agent performance, or the best MTP horizon at deeply occupied context. One wider two-sequence sparse-mask attention test failed; production-relevant dense cases passed. Sparse attention remains disabled. See the [full report](docs/benchmarks/2026-10-01/README.md) and [152 recorded measurements/checks](docs/benchmarks/2026-10-01/results.jsonl) for methods, historical controls, variability, and rollback.
+
+#### Earlier smoke tests and depth study
+
+These historical measurements used different prompt lengths, builds, and server/benchmark paths. They are retained as records, not a matched ranking or the current throughput summary. The newer tables above supersede their Qwen/Agents figures for the stated workloads; models not newly profiled retain their earlier observations.
 
 | Model | Prompt processing | Generation |
 |---|---|---|
@@ -136,9 +170,10 @@ runtime probes, although its generated scene was smaller than the baseline,
 so those lightweight probes do not establish semantic parity by themselves.
 
 The harness did not retain separate prompt-processing and generation rates for
-these long runs. The short controlled measurements above remain the reliable
-throughput data: f16 KV recovered the deep-context slowdown, and one-token MTP
-reached about 33.8 t/s with 86% draft acceptance. The practical conclusion is
+these long runs. That study's historical short controls measured f16 KV
+recovering the deep-context slowdown and one-token MTP reaching about 33.8 t/s
+with 86% draft acceptance; they are separate from October's real-text benchmarks.
+The practical conclusion is
 to keep `qwen3.8-27b-think` as the 128K daily agent profile, keep
 `qwen3.8-27b-mtp` for 256K contexts, and retain the non-speculative
 `qwen3.8-27b` alias as a fallback.
@@ -153,15 +188,15 @@ separately and is not part of this comparison.
 
 ### Choosing a model
 
-- Prefer `agents-a1` for substantial coding, research, and tool-driven work. It combines 35B-class capacity, verified native tool use, a 256K context, and about 81.6 t/s sustained generation on this machine. It can spend many tokens reasoning, so simple tasks may take longer than its raw token rate suggests.
-- Use `gemma-4-e4b` for quick questions, summaries, transformations, and routine edits. Its small VRAM footprint, 1710 t/s prompt processing, and 76.5 t/s generation make it the fast path when the task does not need a larger model.
+- Prefer `agents-a1` for substantial coding, research, and tool-driven work. It combines 35B-class capacity, verified native tool use, and a 256K context. An earlier server run recorded about 81.6 t/s sustained generation; October's separate short direct benchmark measured 100.15 t/s at empty KV and 61.62 t/s at 64K depth. It can spend many tokens reasoning, so simple tasks may take longer than its raw token rate suggests.
+- Use `gemma-4-e4b` for quick questions, summaries, transformations, and routine edits. Its small VRAM footprint and earlier measurements of 1710 t/s prompt processing and 76.5 t/s generation make it the fast path when the task does not need a larger model; it was not newly throughput-profiled in October.
 - Use `qwen3.6-35b-a3b` as the balanced general-purpose option. Its Unsloth UD-Q4_K_S quant is the fastest large Qwen configuration measured here so far, and its projector, developer-role handling, reasoning extraction, and tool calls are validated.
-- Use `qwen3.8-27b-think` as the daily Qwen profile for OpenCode, Pi, and other reasoning-heavy agent work when 128K context is enough. Its f16 KV cache avoids the severe q8_0 slowdown measured at depth, and the current three-token MTP setting is the fastest measured draft horizon. Use `qwen3.8-27b-mtp` when a 256K q8_0 context is required and `qwen3.8-27b` as the conservative non-speculative fallback.
-- Use `nemotron-3.5-lightning` to try NVIDIA's new text-only reasoning and agent model. Use the explicit `nemotron-3.5-lightning-mtp` alias only for MTP experiments; the current SYCL speculative path is slower and can intermittently stop making progress on longer generations.
+- Use `qwen3.8-27b-think` as the daily Qwen profile for OpenCode, Pi, and other reasoning-heavy agent work when 128K context is enough. Its f16 KV cache decoded about 20% faster than q8_0 at 64K depth in the paired October tests. It now uses two MTP drafts and 4096/1024 batching; the 256K q8 MTP profile uses one draft after a near-tied one/two-draft real-text sweep. Use `qwen3.8-27b-mtp` when 256K context is required and `qwen3.8-27b` as the conservative non-speculative fallback. Horizons remain workload-dependent.
+- Use `nemotron-3.5-lightning` to try NVIDIA's text-only reasoning and agent model. Use the explicit `nemotron-3.5-lightning-mtp` alias only for MTP experiments; earlier SYCL tests were slower and intermittently stopped making progress on longer generations. The experimental MTP profile was not retested in October.
 - Try `muse-glimmer-30b` for agentic and multimodal work. Its profile includes the perception projector, native ATEM tool-call parsing, reasoning extraction, and the model authors' sampling defaults. Generation is usable at about 24.2 t/s, though prompt ingestion was relatively slow in the first local test.
 - Keep `glm-4.7-flash` as an independent second opinion.
 
-The measured models hit ~75 % of the B70's GDDR6 bandwidth ceiling. Token-gen rate degrades as the context fills (more KV state to attend per step). Don't expect more without quantizing the model further or using a smaller one — the bottleneck is VRAM bandwidth, not compute.
+Plain single-token generation remains largely bandwidth/attention-bound and slows as the context fills. Larger batching mainly improves prompt processing; MTP can improve output throughput when enough drafts are accepted. A prompt-processing gain should not be read as an equal generation-rate improvement.
 
 Qwen3.6-35B-A3B tuning notes:
 
@@ -171,13 +206,13 @@ Qwen3.6-35B-A3B tuning notes:
 Qwen3.8-27B tuning and usage notes:
 
 - [Qwen3.8-27B](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF) is a dense native vision-language model with 27B parameters, 64 layers, and a repeating hybrid layout of three Gated DeltaNet blocks followed by one full-attention block. It has a native 262,144-token context and can be extended toward 1M with YaRN; the standard profiles stay at the native limit, while `-think` deliberately trades half the context for f16 KV.
-- The selected Q4_K_S GGUF is 16,121,359,328 bytes and attaches the 927,607,488-byte F16 vision projector. Across the 16 full-attention layers, f16 KV consumes exactly 64 KiB per token (`16 layers × 4 KV heads × 256 dimensions × K/V × 2 bytes`): 8 GiB at 128K or 16 GiB at 256K. The two 256K profiles therefore use q8_0 KV (roughly 8 GiB), while `-think` spends the same cache footprint on higher-precision f16 at 128K.
-- Thinking is enabled by default. Temperature and truncation sampling follow the published thinking recipe: `temperature=1.0`, `top_p=0.95`, `top_k=20`, `min_p=0`, `presence_penalty=0`, and `repetition_penalty=1`. The 256K profiles use `--reasoning-budget 2048`, while `-think` raises the hard sampler cap to 8192; all three use `--reasoning-preserve`. Request-level `reasoning_effort` is independently passed into the embedded template and supports `low`, `medium`, and `xhigh` (`high` maps to `xhigh`), but it does not replace the server's hard reasoning-token cap. The 8192 value is a ceiling, not a latency-free default: consuming it fully would take about three minutes at the current short-control rate of 47 t/s, so use `low` for time-sensitive work. Request sampling parameters can still override the server defaults.
-- Both downloads match their published SHA-256 values (`22200efc…a3eb3f9` for the model and `cbb841a9…0b4e43e` for the projector). The 866-tensor model retains a Q8_0 MTP projection and the required normalization tensors at `blk.64.nextn.*`. The 256K q8_0 profiles and the 128K f16 profile have the same nominal 8 GiB KV footprint and occupy roughly 24.2 GiB of the B70's 31.0 GiB exposed memory.
-- Historical build `b10502` matched warm 256-token runs favored one draft token: MTP with one, two, and three draft tokens averaged 31.13, 30.62, and 29.25 t/s. On build `b10931`, the controlled warm 128-token completion favored three: q8 KV measured 50.48 t/s with 93/102 accepted drafts versus 38.02 t/s with one; f16 KV measured 47.13 t/s with 90/109 accepted versus 37.91 t/s with one. Four drafts regressed to 47.58 t/s (q8) and 45.85 t/s (f16), so both Qwen MTP aliases now use `--spec-type draft-mtp --spec-draft-n-max 3`. These are fixed numeric controls; acceptance remains prompt-dependent.
+- The selected Q4_K_S GGUF is 16,121,359,328 bytes and attaches the 927,607,488-byte F16 vision projector. Across the 16 full-attention layers, f16 KV consumes exactly 64 KiB per token (`16 layers × 4 KV heads × 256 dimensions × K/V × 2 bytes`): 8 GiB at 128K or 16 GiB at 256K. The 256K profiles therefore use q8_0 KV, whose scale metadata brings the actual target cache to 8.5 GiB. The MTP drafter has a separate default-f16 cache: 0.5 GiB at 128K or 1 GiB at 256K. The two MTP profiles have similar, not identical, cache footprints.
+- Thinking is enabled by default. Temperature and truncation sampling follow the published thinking recipe: `temperature=1.0`, `top_p=0.95`, `top_k=20`, `min_p=0`, `presence_penalty=0`, and `repetition_penalty=1`. The 256K profiles use `--reasoning-budget 2048`, while `-think` raises the hard sampler cap to 8192; all three use `--reasoning-preserve`. Request-level `reasoning_effort` is independently passed into the embedded template and supports `low`, `medium`, and `xhigh` (`high` maps to `xhigh`), but it does not replace the server's hard reasoning-token cap. The 8192 value is a ceiling, not a latency-free default: consuming it can take several minutes, especially at depth. The earlier 47 t/s figure was a short numeric control, not a real-task guarantee. Use `low` for time-sensitive work. Request sampling parameters can still override the server defaults.
+- Both downloads match their published SHA-256 values (`22200efc…a3eb3f9` for the model and `cbb841a9…0b4e43e` for the projector). The 866-tensor model retains a Q8_0 MTP projection and the required normalization tensors at `blk.64.nextn.*`. October allocation logs confirm the target/draft cache sizes above; account separately for recurrent state, projectors, compute buffers, and temporary attention allocations when estimating headroom.
+- Historical build `b10502` matched warm 256-token runs favored one draft token: MTP with one, two, and three draft tokens averaged 31.13, 30.62, and 29.25 t/s. On build `b10931`, the controlled warm 128-token completion favored three: q8 KV measured 50.48 t/s with 93/102 accepted drafts versus 38.02 t/s with one; f16 KV measured 47.13 t/s with 90/109 accepted versus 37.91 t/s with one. Four drafts regressed to 47.58 t/s (q8) and 45.85 t/s (f16), so that September pass set both aliases to three. These fixed numeric controls are not comparable to October's 5.5K-input/512-output real-text tests, which selected two for f16 and one for q8.
 - Sustained 1,024-token runs completed at 25.47 t/s baseline and 30.81 t/s MTP, with the latter accepting 464/620 drafts (74.8%). Both paths averaged 230.2 W package power and settled near 2.5 GHz under the card's power limit; unlike stalled Nemotron MTP, Qwen3.8 converts the same full power draw into higher useful throughput.
-- At approximately 16K tokens of context, the q8_0 flash-attention path fell from 26.6 t/s at empty context to 15.5 t/s. Changing only the cache to f16 restored 22.2 t/s (+43% at depth); f16 plus MTP reached 33.8 t/s with 86% draft acceptance on the recorded reasoning prompt. Combining `ngram-mod` with MTP was worse at 31.4 t/s and 68% acceptance, so it is deliberately omitted.
-- Qwen3.8 has one trained MTP block, but llama.cpp can reuse that block autoregressively to draft more than one token. Higher `--spec-draft-n-max` values are therefore not ignored; the current build favors three on both the 256K q8 and 128K f16 profiles, while four adds enough verification overhead to regress.
+- In the earlier depth study, q8_0 flash attention fell from 26.6 t/s at empty context to 15.5 t/s at approximately 16K; f16 restored 22.2 t/s (+43%), and f16 plus MTP reached 33.8 t/s with 86% acceptance. That 43% is historical: the matched October 16K rates were about 20.5 q8 and 22.2 f16, while 64K rates were 12.4 and 15.0. Combining `ngram-mod` with MTP was worse in the earlier study, so it remains omitted.
+- Qwen3.8 has one trained MTP block, but llama.cpp can reuse it autoregressively to draft multiple tokens. Higher `--spec-draft-n-max` values are not ignored. The current bounded real-text sweep favors two on f16 and one/two nearly equally on q8; four is slower than non-speculative decoding on these workloads. This does not establish a universal horizon for complete code outputs or very deep agent contexts.
 - With `--parallel 1`, llama-server can reuse a matching prompt prefix within the warm slot. This helps normal growing agent conversations, but a model swap discards that cache and changes to the serialized prefix can prevent a hit; it should not be treated as guaranteed caching across every turn.
 - A seeded code-review quality comparison used the same prompt, `reasoning_effort=low`, and a 3,200-token allowance for each presence penalty. Penalty 0 completed correctly in 2,733 tokens with all requested tests; 0.5 also completed but used 3,050 tokens and omitted one explicit edge-case test; 1.5 exhausted all 3,200 tokens, never reached the requested tests, and returned an implementation that failed to deduplicate tags within the first record. All Qwen3.8 profiles therefore use `--presence-penalty 0`.
 - Do not use `reasoning_effort=none` with this GGUF/template as a latency shortcut. In a direct control at presence penalty 0, it spent the full 2,200-token allowance in `reasoning_content` and returned no final answer. `low` is the verified short-reasoning setting; the hard `--reasoning-budget` remains the reliable upper bound.
@@ -185,7 +220,7 @@ Qwen3.8-27B tuning and usage notes:
 
 Agents-A1 tuning and usage notes:
 
-- [Agents-A1](https://internscience.github.io/Agents-A1/) is a Qwen3.5-architecture 35B-A3B hybrid MoE trained for long-horizon tool use. Its full 35B weight set must still reside in memory even though roughly 3B parameters are active per token. The 262K f16 KV profile uses about 25.1 GiB of VRAM on the B70, leaving roughly 6.9 GiB free.
+- [Agents-A1](https://internscience.github.io/Agents-A1/) is a Qwen3.5-architecture 35B-A3B hybrid MoE trained for long-horizon tool use. Its full 35B weight set must still reside in memory even though roughly 3B parameters are active per token. The 262K f16 profile's October near-limit text check used about 25.7 GiB of device memory before cleanup, leaving about 6.2 GiB free, including background/driver usage; this is not a measured peak.
 - The default profile keeps thinking enabled and separates it into the OpenAI-compatible `reasoning_content` field. Do not give this model tiny output limits: a trivial arithmetic smoke test consumed 278 completion tokens before producing its three-character final answer. The reported 45K-token training trajectories span reasoning, tool calls, observations, and multiple turns; they do not imply that each response should be a 45K-token monologue.
 - The model authors recommend `temperature=0.85`, `top_p=0.95`, `top_k=20`, `min_p=0`, `presence_penalty=1.1`, and `repetition_penalty=1.0`. These are the server defaults for this profile, but request parameters from clients can override them.
 - Keep the embedded Jinja template. It supplies the Qwen3-Coder XML tool format, supports parallel calls, and preserves tool observations across turns. Local smoke tests verified parsed `tool_calls`, `reasoning_content`, and a complete call → tool response → final answer round trip.
@@ -217,7 +252,16 @@ For comparison, LM Studio's bundled Vulkan llama.cpp measured ~9 t/s in the hist
 
 ## llama.cpp update notes
 
-Current local build: `3057bb66c` (`b10931`, binary build 1999), built with IntelLLVM 2026.1.1.
+Current local build: `5fc4f3c8c` (`b11337-10-g5fc4f3c8c`, local binary build 2415, `0.5.0-dev`), built with IntelLLVM 2026.1.1. `llama.cpp/build` is a symlink to the validated `build-sycl-20261001` directory.
+
+### Maintenance and profiling record: 2026-10-01–02
+
+- Fast-forwarded the clean source checkout by 416 commits from `3057bb66c` to `5fc4f3c8c`, then built `llama-server`, `llama-bench`, and `test-backend-ops` in a separate directory with the existing SYCL/oneAPI settings. The compiler/runtime stack did not change.
+- Relevant upstream work includes MKL attention softmax coalescing, tiled/fused SSM convolution, RMS-norm/scale and mixed-quant GLU fusion, GPU radix top-k, a B70 single-allocation workaround, and oneDNN scratchpad ordering fixes. See the [full report](docs/benchmarks/2026-10-01/README.md) for primary references and applicability limits.
+- Paired default-setting throughput is mostly within about 1% of the saved build. Larger 4096/1024 batches improve 8K/64K prompt processing by 18–24% for Qwen and 28–34% for Agents-A1. MKL-only attention was slower than ordinary oneDNN dispatch at both depths, so no backend override was added.
+- The real-text sweep selected two drafts for the 128K f16 thinking profile and one for the 256K q8 MTP profile. The f16 combination averaged 30.96 t/s and 22.60 seconds per bounded warm request versus 27.59 t/s and 26.02 seconds on the old three-draft/2048–512 profile. Sampling, reasoning budgets, cache types, context limits, and all aliases remain unchanged.
+- Selected core correctness passed 2037/2037; dense head-width-256 attention passed 117/117 with normal dispatch and 117/117 with MKL-only attention. One wider two-sequence sparse-mask edge case failed (122/123), unlike the current single-slot dense configurations; it is documented and is not claimed to be pre-existing or fixed.
+- Tuned production-profile tool round trips and near-limit text cache fills passed at 126,976 tokens for Qwen f16 and 253,952 for Qwen q8 and Agents-A1, without shrinking context. Old builds/configs remain available for rollback; the detailed report includes reproduction and validation commands.
 
 ### Maintenance record: 2026-09-12
 
@@ -277,7 +321,7 @@ The intervening SYCL work includes oneMKL/XMX flash attention for prompt process
 
 This update matters for Intel Arc because upstream llama.cpp now includes oneDNN/XMX flash attention, Battlemage flash-attention tuning, fused top-k MoE dispatch, `Q2_K` reorder support, and several SYCL quantization and copy correctness fixes. It also retains the earlier reorder optimizations for `Q4_K`, `Q5_K`, `Q6_K`, and `Q8_0`.
 
-Rebuild command used here:
+Rebuild command used here (choose a new dated directory for future updates):
 
 ```bash
 cd ~/Code/intel/llama.cpp
@@ -285,7 +329,8 @@ git fetch --tags origin master
 git checkout master
 git pull --ff-only origin master
 source /opt/intel/oneapi/setvars.sh > /dev/null
-cmake --fresh -S . -B build \
+task_build_dir=build-sycl-20261001
+cmake -S . -B "$task_build_dir" \
   -DCMAKE_C_COMPILER=icx \
   -DCMAKE_CXX_COMPILER=icpx \
   -DGGML_SYCL=ON \
@@ -295,16 +340,18 @@ cmake --fresh -S . -B build \
   -DGGML_SYCL_GRAPH=ON \
   -DGGML_SYCL_HOST_MEM_FALLBACK=ON \
   -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release --target llama-server llama-bench test-backend-ops -j 6
+cmake --build "$task_build_dir" --config Release --target llama-server llama-bench test-backend-ops -j 6
 ```
+
+The directory above is now active; do not reuse it for the next update while a model is running. Stage a fresh build, pause llama-swap for isolated comparisons, and switch the stable `build` link only after validation. Avoid `cmake --fresh -B build` against the active symlink. The saved original is `build-original-20261001`; the independent benchmark snapshot is `build-b10931-20260912`. Follow the [rollback procedure](docs/benchmarks/2026-10-01/README.md#deployment-and-rollback) rather than deleting either directory.
 
 Notes from the rebuild:
 
 - Ubuntu package `libze-dev` is installed, so CMake enables `GGML_SYCL_SUPPORT_LEVEL_ZERO_API` and links the direct Level Zero allocation path.
 - `GGML_SYCL_F16=ON` remains enabled. Upstream recommends testing both modes because FP16 can improve prompt processing depending on the model.
 - Keep `GGML_SYCL_DEVICE_ARCH` unset for this build. The current upstream CMake logic skips `-ze-intel-greater-than-4GB-buffer-required` for `spir64_gen` AOT builds, which made the local large-model configuration unsuitable for the attempted `bmg-g21` AOT build. The normal JIT path is cached after its initial device compilation.
-- The embedded llama.cpp web UI was built from the checked-out sources with npm and linked as gzip-compressed assets. The initial UI dependency install requires network access.
-- Host validation reports `SYCL0: Intel(R) Graphics [0xe223]` with 31023 MiB and `llama-server --version` reports IntelLLVM 2026.1.1.
+- October's candidate embeds downloaded upstream prebuilt llama-ui assets (its stamp requests `b2415`); earlier rebuilds used npm or cached assets. The stamp alone is not proof of the exact downloaded UI revision. Native binary provenance is verified independently.
+- Current validation reports `SYCL0: Intel(R) Graphics [0xe223]` with 32656 MiB, and `llama-server --version` reports IntelLLVM 2026.1.1, build 2415, commit `5fc4f3c8c`.
 
 ### Historical MTP speculative decoding (retired)
 

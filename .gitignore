@@ -15,7 +15,8 @@ __pycache__/
 .ruff_cache/
 .DS_Store
 
-models/
+# Local convenience symlink or directory to the external model store.
+/models
 *.gguf
 *.safetensors
 *.bin
