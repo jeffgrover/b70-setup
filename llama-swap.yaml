@@ -117,6 +117,60 @@ models:
       --repeat-penalty 1.0
       --alias qwen3.8-27b-think"
 
+  # Swift 1.5 uses its own GGUF/projector and embedded template, not Qwen's weights.
+  # 2026-10-07: select 4096/2048 and two probabilistic drafts from independent sweeps.
+  # The new mode requires build 18b5f8b18 or newer; q8/MTP has only ~1.6 GiB
+  # free after near-256K text stress. See docs/benchmarks/2026-10-07/README.md.
+  swift-1.5-27b:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/Swift-1.5-Qwen3.8-27B-Q4_K_S.gguf
+      --mmproj /home/jeff/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/mmproj-Swift-1.5-Qwen3.8-27B-F16.gguf
+      -ngl 999 -c 262144 -ctk q8_0 -ctv q8_0 -fa on
+      -b 4096 -ub 2048 --parallel 1 --metrics
+      --host 127.0.0.1 --port 9000 --jinja
+      --reasoning on --reasoning-format deepseek
+      --reasoning-budget 2048 --reasoning-preserve
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0
+      --presence-penalty 0 --repeat-penalty 1.0
+      --alias swift-1.5-27b"
+
+  swift-1.5-27b-mtp:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/Swift-1.5-Qwen3.8-27B-Q4_K_S.gguf
+      --mmproj /home/jeff/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/mmproj-Swift-1.5-Qwen3.8-27B-F16.gguf
+      -ngl 999 -c 262144 -ctk q8_0 -ctv q8_0 -fa on
+      -b 4096 -ub 2048 --parallel 1 --metrics
+      --host 127.0.0.1 --port 9000 --jinja
+      --reasoning on --reasoning-format deepseek
+      --reasoning-budget 2048 --reasoning-preserve
+      --spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-sampling probabilistic
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0
+      --presence-penalty 0 --repeat-penalty 1.0
+      --alias swift-1.5-27b-mtp"
+
+  swift-1.5-27b-think:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/Swift-1.5-Qwen3.8-27B-Q4_K_S.gguf
+      --mmproj /home/jeff/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/mmproj-Swift-1.5-Qwen3.8-27B-F16.gguf
+      -ngl 999 -c 131072 -ctk f16 -ctv f16 -fa on
+      -b 4096 -ub 2048 --parallel 1 --metrics
+      --host 127.0.0.1 --port 9000 --jinja
+      --reasoning on --reasoning-format deepseek
+      --reasoning-budget 8192 --reasoning-preserve
+      --spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-sampling probabilistic
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0
+      --presence-penalty 0 --repeat-penalty 1.0
+      --alias swift-1.5-27b-think"
+
   # 2026-10-02: larger batching improved pp8K ~34% and pp64K ~28%; sampler/KV/context unchanged.
   agents-a1:
     proxy: http://127.0.0.1:9000

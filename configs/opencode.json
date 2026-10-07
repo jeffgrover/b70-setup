@@ -98,6 +98,114 @@
             ]
           }
         },
+        "swift-1.5-27b": {
+          "name": "Swift 1.5 Qwen3.8-27B Q4_K_S (256K, vision)",
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "variants": {
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "medium": {
+              "reasoningEffort": "medium"
+            },
+            "high": {
+              "reasoningEffort": "xhigh"
+            },
+            "xhigh": {
+              "reasoningEffort": "xhigh"
+            }
+          }
+        },
+        "swift-1.5-27b-mtp": {
+          "name": "Swift 1.5 Qwen3.8-27B Q4_K_S (256K, vision, experimental MTP)",
+          "limit": {
+            "context": 262144,
+            "output": 262144
+          },
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "variants": {
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "medium": {
+              "reasoningEffort": "medium"
+            },
+            "high": {
+              "reasoningEffort": "xhigh"
+            },
+            "xhigh": {
+              "reasoningEffort": "xhigh"
+            }
+          }
+        },
+        "swift-1.5-27b-think": {
+          "name": "Swift 1.5 Qwen3.8-27B Q4_K_S (128K f16 KV, vision, MTP, thinking-tuned)",
+          "limit": {
+            "context": 131072,
+            "output": 131072
+          },
+          "attachment": true,
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          },
+          "variants": {
+            "low": {
+              "reasoningEffort": "low"
+            },
+            "medium": {
+              "reasoningEffort": "medium"
+            },
+            "high": {
+              "reasoningEffort": "xhigh"
+            },
+            "xhigh": {
+              "reasoningEffort": "xhigh"
+            }
+          }
+        },
         "agents-a1": {
           "name": "Agents-A1 Q4_K_M (256K)",
           "limit": {

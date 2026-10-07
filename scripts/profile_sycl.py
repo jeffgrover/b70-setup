@@ -28,6 +28,7 @@ MODELS = {
     "agents": MODEL_ROOT / "InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf",
     "qwen36": MODEL_ROOT / "unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_S.gguf",
     "nemotron": MODEL_ROOT / "bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_K_S.gguf",
+    "swift": MODEL_ROOT / "ukisai/Swift-1.5-Qwen3.8-27B-GGUF/Swift-1.5-Qwen3.8-27B-Q4_K_S.gguf",
 }
 PROMPTS = {
     "coding": "Implement a Python asyncio work queue with bounded capacity, graceful shutdown, cancellation, exponential retry backoff, and exactly-once result delivery within one process. Explain the invariants, then provide executable code and tests for failed workers and shutdown races.",
@@ -61,6 +62,18 @@ def cases(suite: str) -> list[dict]:
         for model, kv in [("qwen", "q8_0"), ("qwen", "f16"), ("agents", "f16")]:
             for prompt in [8192, 64000]:
                 add(model, kv, prompt, 0, batch=4096, ubatch=1024)
+    elif suite == "swift":
+        for kv in ["q8_0", "f16"]:
+            add("swift", kv, 512, 128, reps=3)
+            for prompt in [8192, 64000]:
+                add("swift", kv, prompt, 0, batch=4096, ubatch=1024)
+            add("swift", kv, 0, 128, depth=64000, batch=4096, ubatch=1024)
+    elif suite == "swift-tuning":
+        for kv in ["q8_0", "f16"]:
+            for batch, ubatch in [(2048, 512), (4096, 1024), (4096, 2048), (8192, 2048)]:
+                add("swift", kv, 8192, 0, batch=batch, ubatch=ubatch)
+            for batch, ubatch in [(4096, 1024), (4096, 2048), (8192, 2048)]:
+                add("swift", kv, 64000, 0, batch=batch, ubatch=ubatch)
     return result
 
 
@@ -143,8 +156,10 @@ def model_command(config_path: Path, build: Path, alias: str, port: int) -> list
 
 def profile_command(args: argparse.Namespace, horizon: int) -> list[str]:
     # Include the production projector, context allocation, and sampling defaults.
-    alias = "qwen3.8-27b-think" if args.kv == "f16" else "qwen3.8-27b-mtp"
+    alias = getattr(args, "alias", None) or ("qwen3.8-27b-think" if args.kv == "f16" else "qwen3.8-27b-mtp")
     command = model_command(args.config, args.build, alias, args.port)
+    if command[command.index("-ctk") + 1] != args.kv:
+        raise ValueError("--kv must match the selected production profile")
     command[command.index("--spec-draft-n-max") + 1] = str(horizon)
     if args.batch is not None:
         command += ["-b", str(args.batch)]
@@ -155,6 +170,14 @@ def profile_command(args: argparse.Namespace, horizon: int) -> list[str]:
         del command[index:index + 2]
         index = command.index("--spec-draft-n-max")
         del command[index:index + 2]
+        if "--spec-draft-sampling" in command:
+            index = command.index("--spec-draft-sampling")
+            del command[index:index + 2]
+    elif getattr(args, "draft_sampling", None):
+        if "--spec-draft-sampling" in command:
+            command[command.index("--spec-draft-sampling") + 1] = args.draft_sampling
+        else:
+            command += ["--spec-draft-sampling", args.draft_sampling]
     return command
 
 
@@ -166,12 +189,16 @@ def mtp(args: argparse.Namespace) -> None:
     else:
         connection.close()
         raise RuntimeError(f"Port {args.port} is occupied; choose another --port")
+    completed_samples = set()
+    if args.results.exists() and not args.repeat:
+        for line in args.results.read_text(encoding="utf-8").splitlines():
+            completed_samples.add(json.loads(line).get("sample"))
     # Padding is deterministic repository-like text, not a repeating numeric sequence.
     context = "\n".join(
         f"module_{i:03d}.py: async def worker_{i}(queue, stop): "
         "item = await queue.get(); await process(item); queue.task_done(); "
         "# cancellation must preserve queue accounting and release owned resources"
-        for i in range(128)
+        for i in range(getattr(args, "padding_modules", 128))
     )
     for horizon in map(int, args.horizons.split(",")):
         command = profile_command(args, horizon)
@@ -182,6 +209,18 @@ def mtp(args: argparse.Namespace) -> None:
             elif word in ("-ub", "--ubatch-size"):
                 ubatch = int(command[index + 1])
         key = f"{args.label}-mtp-{args.kv}-h{horizon}-b{batch}-ub{ubatch}"
+        if getattr(args, "alias", None):
+            key += f"-{args.alias}"
+        if getattr(args, "draft_sampling", None):
+            key += f"-{args.draft_sampling}"
+        elif "--spec-draft-sampling" in command:
+            key += f"-{command[command.index('--spec-draft-sampling') + 1]}"
+        if args.tokens != 512:
+            key += f"-n{args.tokens}"
+        if getattr(args, "padding_modules", 128) != 128:
+            key += f"-pad{args.padding_modules}"
+        if getattr(args, "workloads", None):
+            key += f"-tasks{args.workloads.replace(',', '-')}"
         if args.fa_backend != "auto":
             key += f"-{args.fa_backend}"
         if (args.raw / f"{key}.done").exists() and not args.repeat:
@@ -205,6 +244,8 @@ def mtp(args: argparse.Namespace) -> None:
                         raise TimeoutError(f"{key} server startup timed out")
                     time.sleep(1)
                 for name, task in PROMPTS.items():
+                    if getattr(args, "workloads", None) and name not in args.workloads.split(','):
+                        continue
                     messages = [
                         {"role": "system", "content": "You are a careful coding assistant. Think through the problem and provide a concrete, technically correct answer."},
                         {"role": "user", "content": "Repository notes:\n" + context + "\n\nTask:\n" + task},
@@ -216,13 +257,21 @@ def mtp(args: argparse.Namespace) -> None:
                     # Discard one full request per workload to warm the tested paths.
                     request(args.port, "/completion", body)
                     for rep in range(args.repetitions):
+                        sample = f"{key}-{name}-r{rep}"
+                        if sample in completed_samples:
+                            print(f"SKIP {sample}: already recorded", flush=True)
+                            continue
                         started = time.monotonic()
                         response = request(args.port, "/completion", body)
                         elapsed = time.monotonic() - started
-                        sample = f"{key}-{name}-r{rep}"
                         (args.raw / f"{sample}.json").write_text(json.dumps(response, indent=2) + "\n", encoding="utf-8")
                         timings = response["timings"]
-                        record(args, dict(kind="mtp", kv=args.kv, horizon=horizon, workload=name,
+                        record(args, dict(kind="mtp", sample=sample, kv=args.kv, horizon=horizon, workload=name,
+                                          alias=command[command.index("--alias") + 1],
+                                          draft_sampling=(command[command.index("--spec-draft-sampling") + 1]
+                                                          if "--spec-draft-sampling" in command else "greedy"),
+                                          output_cap=args.tokens,
+                                          padding_modules=getattr(args, "padding_modules", 128),
                                           repetition=rep, batch=batch, ubatch=ubatch,
                                           fa_backend=args.fa_backend,
                                           command=command,
@@ -256,9 +305,15 @@ def main() -> None:
     parser.add_argument("--raw", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=ROOT / "llama-swap.yaml",
                         help="Production profile source for MTP tests; use a saved config to reproduce old runs")
-    parser.add_argument("--suite", choices=["comparison", "tuning"], default="comparison")
+    parser.add_argument("--suite", choices=["comparison", "tuning", "swift", "swift-tuning"], default="comparison")
     parser.add_argument("--cases", help="Comma-separated case-name substrings")
     parser.add_argument("--kv", choices=["f16", "q8_0"], default="f16")
+    parser.add_argument("--alias", help="Production MTP profile to test instead of the default Qwen alias")
+    parser.add_argument("--draft-sampling", choices=["greedy", "probabilistic"],
+                        help="Optional newer-build draft sampling mode; omit for older-build compatibility")
+    parser.add_argument("--padding-modules", type=int, default=128,
+                        help="Repository-padding length for occupied-context MTP checks")
+    parser.add_argument("--workloads", help="Optional comma-separated coding,reasoning,agent subset")
     parser.add_argument("--fa-backend", choices=["auto", "mkl"], default="auto",
                         help="mkl bypasses oneDNN SDPA only; oneDNN matrix multiplication stays enabled")
     parser.add_argument("--horizons", default="1,2,3,4")
@@ -269,6 +324,8 @@ def main() -> None:
     parser.add_argument("--ubatch", type=int, help="Override microbatch size for bench or MTP tests")
     parser.add_argument("--repeat", action="store_true", help="Append fresh measurements even if raw results exist")
     args = parser.parse_args()
+    if args.workloads and any(name not in PROMPTS for name in args.workloads.split(',')):
+        parser.error("--workloads must select coding,reasoning,agent")
     args.build = args.build.resolve()
     args.raw.mkdir(parents=True, exist_ok=True)
     args.results.parent.mkdir(parents=True, exist_ok=True)

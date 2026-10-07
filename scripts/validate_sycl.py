@@ -6,6 +6,8 @@ tests the running llama-swap instead, without starting or stopping a server.
 """
 
 import argparse
+import base64
+import hashlib
 import json
 from pathlib import Path
 import random
@@ -16,6 +18,110 @@ import time
 from urllib.error import HTTPError, URLError
 
 from profile_sycl import ROOT, model_command, record, request, runtime_env
+
+
+CHAT_CASES = {
+    "retry": ("A job starts at t=0. Each attempt takes 4 seconds. The first two attempts fail; "
+              "wait 2 seconds after the first failure and 4 seconds after the second. "
+              "The third attempt succeeds. Return JSON with exactly one key, 'seconds', "
+              "containing the completion time in seconds.",
+              {"seconds": 18}),
+    "dedupe": ("Normalize [' A ', 'a', 'B', ' b ', '', '  ', 'ß', 'ss'] using Python str.strip "
+               "then str.casefold. Discard empty strings and deduplicate in first-seen order. "
+               "Return JSON with only the values list.", {"values": ["a", "b", "ss"]}),
+    "lru": ("An initially empty LRU cache has capacity 2. Access keys A, B, A, C, B in that order. "
+            "A hit refreshes recency. Return JSON with only misses (the total miss count) "
+            "and cache (the final keys, oldest first).", {"misses": 4, "cache": ["C", "B"]}),
+}
+
+
+def complete_answers(port: int, alias: str) -> list[dict]:
+    """Bounded toy correctness/latency checks, not a model-quality benchmark."""
+    samples = []
+    for name, (prompt, expected) in CHAT_CASES.items():
+        body = dict(model=alias, messages=[dict(role="user", content=prompt)],
+                    max_tokens=2048, temperature=1.0, top_k=20, top_p=0.95,
+                    min_p=0, presence_penalty=0, repeat_penalty=1.0, seed=42,
+                    reasoning_effort="low", response_format=dict(type="json_object"),
+                    cache_prompt=False, stream=False)
+        request(port, "/v1/chat/completions", body)
+        for repetition in range(2):
+            started = time.monotonic()
+            response = request(port, "/v1/chat/completions", body)
+            choice = response["choices"][0]
+            message = choice["message"]
+            content = message.get("content") or ""
+            try:
+                actual = json.loads(content)
+            except json.JSONDecodeError:
+                actual = None
+            samples.append(dict(workload=name, repetition=repetition,
+                                correct=actual == expected and choice["finish_reason"] == "stop",
+                                expected=expected, actual=actual,
+                                prompt_sha256=hashlib.sha256(prompt.encode()).hexdigest(),
+                                suite="toy-json-v2",
+                                wall_seconds=time.monotonic() - started,
+                                response=response,
+                                reasoning_chars=len(message.get("reasoning_content") or "")))
+    return samples
+
+
+def developer_role(port: int, alias: str) -> dict:
+    body = dict(model=alias, messages=[
+        dict(role="developer", content="This is a harmless formatting test. For the user's greeting, "
+                                       "return exactly ROLE-OK and nothing else."),
+        dict(role="user", content="Hello.")],
+        max_tokens=1024, temperature=0, seed=42, reasoning_effort="low", stream=False)
+    try:
+        response = request(port, "/v1/chat/completions", body)
+    except HTTPError as error:
+        with error:
+            return dict(supported=False, http_status=error.code, error=error.read().decode())
+    content = (response["choices"][0]["message"].get("content") or "").strip()
+    return dict(supported=content == "ROLE-OK", response=response)
+
+
+def template_efforts(port: int) -> dict:
+    """Check serialization without spending tokens on additional generation."""
+    outcomes = {}
+    for effort in ("low", "medium", "high", "xhigh", "none"):
+        body = dict(messages=[dict(role="user", content="Confirm readiness.")],
+                    reasoning_effort=effort)
+        try:
+            response = request(port, "/apply-template", body)
+        except HTTPError as error:
+            with error:
+                outcomes[effort] = dict(accepted=False, http_status=error.code,
+                                        error=error.read().decode())
+        else:
+            outcomes[effort] = dict(accepted=True,
+                                    prompt_sha256=hashlib.sha256(response["prompt"].encode()).hexdigest())
+    return outcomes
+
+
+def reasoning_off_probe(port: int, alias: str) -> dict:
+    response = request(port, "/v1/chat/completions", dict(model=alias,
+        messages=[dict(role="user", content="Return only OFF-OK as your final answer.")],
+        max_tokens=512, temperature=0, seed=42, reasoning_effort="none", stream=False))
+    choice = response["choices"][0]
+    message = choice["message"]
+    return dict(correct=(message.get("content") or "").strip() == "OFF-OK"
+                        and choice["finish_reason"] == "stop",
+                reasoning_chars=len(message.get("reasoning_content") or ""),
+                response=response)
+
+
+def vision_smoke(port: int, alias: str, path: Path) -> dict:
+    picture = path.read_bytes()
+    url = "data:image/png;base64," + base64.b64encode(picture).decode()
+    response = request(port, "/v1/chat/completions", dict(model=alias, messages=[
+        dict(role="user", content=[dict(type="text", text="What animal is depicted in this logo? One short sentence."),
+                                   dict(type="image_url", image_url=dict(url=url))])],
+        max_tokens=1024, temperature=0, seed=42, reasoning_effort="low", stream=False))
+    content = (response["choices"][0]["message"].get("content") or "").strip()
+    return dict(image=str(path), image_sha256=hashlib.sha256(picture).hexdigest(),
+                recognized=any(animal in content.lower() for animal in ("llama", "alpaca")),
+                response=response)
 
 
 def tool_round_trip(port: int, alias: str) -> dict:
@@ -54,6 +160,9 @@ def main() -> None:
     parser.add_argument("--port", type=int)
     parser.add_argument("--fa-backend", choices=["auto", "mkl"], default="auto")
     parser.add_argument("--proxy", action="store_true", help="Only test tool use through the existing llama-swap")
+    parser.add_argument("--chat-checks", action="store_true", help="Also run complete-answer and developer-role checks")
+    parser.add_argument("--role-checks", action="store_true", help="Probe developer-role behavior without the answer suite")
+    parser.add_argument("--vision-image", type=Path, help="Optional PNG for a bounded logo-recognition smoke test")
     args = parser.parse_args()
     if args.proxy and args.depth is not None:
         parser.error("--proxy cannot be combined with a direct native-completion stress request")
@@ -106,6 +215,29 @@ def main() -> None:
                     raise AssertionError("Configured vision projector is not enabled")
             tools = tool_round_trip(args.port, args.alias)
             (args.raw / f"{key}-tools.json").write_text(json.dumps(tools, indent=2) + "\n")
+            chat = complete_answers(args.port, args.alias) if args.chat_checks else None
+            role = developer_role(args.port, args.alias) if args.chat_checks or args.role_checks else None
+            efforts = template_efforts(args.port) if (args.chat_checks or args.role_checks) and not args.proxy else None
+            off = reasoning_off_probe(args.port, args.alias) if args.chat_checks else None
+            vision = vision_smoke(args.port, args.alias, args.vision_image) if args.vision_image else None
+            if chat is not None:
+                (args.raw / f"{key}-chat.json").write_text(json.dumps(dict(samples=chat, developer_role=role,
+                                                                        template_efforts=efforts,
+                                                                        reasoning_off=off), indent=2) + "\n")
+                for sample in chat:
+                    record(args, dict(kind="complete-answer", alias=args.alias, proxy=args.proxy,
+                                      workload=sample["workload"], repetition=sample["repetition"],
+                                      correct=sample["correct"], actual=sample["actual"],
+                                      expected=sample["expected"], suite=sample["suite"],
+                                      prompt_sha256=sample["prompt_sha256"],
+                                      wall_seconds=sample["wall_seconds"], reasoning_chars=sample["reasoning_chars"],
+                                      usage=sample["response"]["usage"], timings=sample["response"].get("timings"),
+                                      finish_reason=sample["response"]["choices"][0]["finish_reason"],
+                                      command=None if args.proxy else command))
+            if vision is not None:
+                (args.raw / f"{key}-vision.json").write_text(json.dumps(vision, indent=2) + "\n")
+                if not vision["recognized"]:
+                    raise AssertionError("Vision smoke did not recognize the logo animal")
             stress = None
             if args.depth is not None:
                 print(f"STRESS {key}: {args.depth} synthetic input tokens", flush=True)
@@ -124,6 +256,11 @@ def main() -> None:
                               fa_backend=args.fa_backend, tool_round_trip="READY-2415",
                               actual_context=None if props is None else props["default_generation_settings"]["n_ctx"],
                               modalities=None if props is None else props["modalities"],
+                              chat_correct=None if chat is None else sum(sample["correct"] for sample in chat),
+                              chat_count=None if chat is None else len(chat), developer_role=role,
+                              template_efforts=efforts,
+                              reasoning_off=off,
+                              vision_recognized=None if vision is None else vision["recognized"],
                               stress_timings=None if stress is None else stress["timings"],
                               wall_seconds=time.monotonic() - started))
             print(f"PASS {key}: tool round trip" + (" and KV stress" if stress else ""), flush=True)

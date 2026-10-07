@@ -4,13 +4,15 @@ Single-port OpenAI-compatible chat-completions endpoint at `http://127.0.0.1:808
 
 See the [B70 agentic LLM tuning report](docs/b70-agentic-tuning-report.pdf) for the earlier profiling history, before/after client comparison, charts, subjective scores, and recommended operating procedure. The self-contained [HTML source](docs/b70-agentic-tuning-report.html) is included alongside the PDF.
 
-The latest [October 1–2 SYCL update and tuning pass](docs/benchmarks/2026-10-01/README.md) includes paired old/new measurements, real-text MTP sweeps, near-limit memory checks, raw results, and rollback instructions. Larger batching improved measured prompt processing by 18–34%; the updated thinking profile reduced bounded warm request time by about 13%. Source-only default-setting gains were generally about 1%, not the much larger upstream MKL percentages.
+The latest [October 7 Swift integration and SYCL tuning pass](docs/benchmarks/2026-10-07/README.md) adds Swift 1.5 Qwen3.8-27B and deploys build 2546 / `18b5f8b18`. Source-only throughput is essentially flat; 2048-token microbatches improve 8K prompt ingestion by about 10% over the existing 1024 setting. The new probabilistic MTP mode improves matched f16 generation by 9.5% and q8 generation by 4.7% on bounded real-text requests. Near-limit context, tools, vision, and client mapping checks passed; 256K MTP headroom is tight and no whole-agent speedup is claimed.
+
+The previous [October 1–2 Qwen/Agents tuning pass](docs/benchmarks/2026-10-01/README.md) retains paired old/new measurements and the earlier 18–34% batch gains. Those historical results remain separately labeled below.
 
 ## Hardware & OS
 
 | | |
 |---|---|
-| Box | Minisforum Venus mini-PC, AMD CPU, 32 GB RAM, 64 GB swap |
+| Box | Minisforum Venus mini-PC, AMD Ryzen 9 7940HS, 32 GB RAM; 8 GiB active swap observed October 7 |
 | GPU | Intel Arc Pro B70 (Battlemage, 32 GB VRAM, device id `0xe223`) |
 | Connection | USB4 → eGPU enclosure |
 | OS | Ubuntu 26.04 LTS "resolute", kernel 7.0.0-x, `xe` driver |
@@ -20,7 +22,7 @@ The latest [October 1–2 SYCL update and tuning pass](docs/benchmarks/2026-10-0
 
 ```
 opencode / pi
-      ↓  POST /v1/chat/completions  { "model": "qwen3.6-35b-a3b" | "qwen3.8-27b" | "qwen3.8-27b-mtp" | "qwen3.8-27b-think" | "agents-a1" | "nemotron-3.5-lightning" | "nemotron-3.5-lightning-mtp" | "muse-glimmer-30b" | "gemma-4-e4b" | "gemma-4-31b-qat" | "glm-4.7-flash" }
+      ↓  POST /v1/chat/completions  { "model": "<alias from Models below>" }
 http://127.0.0.1:8080
   llama-swap                          ← model registry: ~/Code/intel/llama-swap.yaml
       ↓  spawns/kills based on requested model
@@ -39,6 +41,9 @@ Only one llama-server runs at a time. First request to a different model trigger
 | `qwen3.8-27b` | `~/.lmstudio/models/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_S.gguf` + `mmproj-F16.gguf` | Q4_K_S | 256 K (q8_0 KV) | ~24.2 GiB (78%) |
 | `qwen3.8-27b-mtp` | Same MTP-preserving GGUF + projector | Q4_K_S + MTP | 256 K (q8_0 KV) | ~28.5 GiB (October text stress) |
 | `qwen3.8-27b-think` | Same MTP-preserving GGUF + projector | Q4_K_S + MTP | 128 K (f16 KV) | ~26.2 GiB (October text stress) |
+| `swift-1.5-27b` | `~/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/Swift-1.5-Qwen3.8-27B-Q4_K_S.gguf` + `mmproj-Swift-1.5-Qwen3.8-27B-F16.gguf` | Q4_K_S | 256 K (q8_0 KV) | ~27.2 GiB (October 7 shallow vision/tool check) |
+| `swift-1.5-27b-mtp` | Same Swift GGUF + projector | Q4_K_S + MTP | 256 K (q8_0 KV) | ~30.3 GiB (October 7 text stress) |
+| `swift-1.5-27b-think` | Same Swift GGUF + projector | Q4_K_S + MTP | 128 K (f16 KV) | ~27.5 GiB (October 7 text stress) |
 | `agents-a1` | `~/.lmstudio/models/InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~25.7 GiB (October text stress) |
 | `nemotron-3.5-lightning` | `~/.lmstudio/models/bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_K_S.gguf` | Q4_K_S | 256 K (f16 KV) | ~24.3 GB |
 | `nemotron-3.5-lightning-mtp` | Same MTP-preserving GGUF | Q4_K_S + MTP | 256 K (f16 KV) | ~24.3 GB |
@@ -47,13 +52,39 @@ Only one llama-server runs at a time. First request to a different model trigger
 | `gemma-4-31b-qat` | `~/.lmstudio/models/lmstudio-community/gemma-4-31B-it-QAT-GGUF/gemma-4-31B-it-QAT-Q4_0.gguf` | Q4_0 QAT | 128 K (q8_0 KV) | ~20 GB |
 | `glm-4.7-flash` | `~/.lmstudio/models/lmstudio-community/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q4_K_M.gguf` | Q4_K_M | 128 K (q8_0 KV) | ~19 GB |
 
-October VRAM entries report whole-device usage before cleanup in near-limit text checks, including driver/background allocations; the other entries are earlier observations under different workloads. None is a peak guarantee. End-of-run free memory was about 5.7 GiB for Qwen f16/MTP, 3.4 GiB for Qwen q8/MTP, and 6.2 GiB for Agents-A1. Qwen projectors were loaded, but image/video stress was not tested.
+October text-stress VRAM entries report whole-device usage before cleanup, including driver/background allocations; the plain Swift row is only a shallow vision/tool check. The other entries are earlier observations under different workloads. None is a peak guarantee. October 1 end-of-run free memory was about 5.7 GiB for Qwen f16/MTP, 3.4 GiB for Qwen q8/MTP, and 6.2 GiB for Agents-A1. October 7 Swift had about 4.4 GiB free on f16/MTP and only 1.6 GiB on q8/MTP. Projectors were loaded and Swift recognized a logo at shallow context, but image-at-full-context/video stress was not tested. Prefer f16 when 128K is enough; keep competing GPU workloads out of the 256K MTP profile, and use the plain profile or reduce microbatching if more headroom is needed.
 
 GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stacks coexist.
 
 ### Measured performance
 
-#### Latest paired and tuned measurements: 2026-10-01–02
+#### Swift 1.5 integration and tuning: 2026-10-07
+
+Candidate build `18b5f8b18` / 2546; same IntelLLVM 2026.1.1/oneAPI stack. Swift Q4_K_S direct non-MTP benchmarks use normal oneDNN dispatch, full GPU offload, flash attention, and `-b 4096 -ub 2048` for prompt columns. The separate decode control generates 128 tokens at 64,000-token KV depth with 4096/1024. Rates are tokens/second.
+
+| Swift KV | Prompt, 8,192 tokens | Prompt, 64,000 tokens | Gain over 4096/1024, 8K / 64K | Decode at 64K depth |
+|---|---:|---:|---:|---:|
+| q8_0 | 1176.30 | 927.14 | +10.3% / +8.0% | 12.48 |
+| f16 | 1176.17 | 924.49 | +10.3% / +7.3% | 15.01 |
+
+4096/2048 matched 8192/2048 at both prompt lengths, so the larger logical batch was unnecessary. At 8K, the selected setting improves over 2048/512 by 35–37%. These are batching gains, not source-only SYCL gains: with settings held unchanged, Swift prompt rates changed by about -1% and decoding by less than +1% versus the saved October 1 build. Qwen controls were flat; an initial Agents prefill outlier did not reproduce in matched old/new/new/old repeats.
+
+Real-text server tests include Swift's projector and full production cache allocation, three workloads with 5522–5542 input tokens, two measured 512-token outputs per workload after discarded warmups, no prompt reuse, and the published sampler. All rows below use two drafts and 4096/2048; they isolate draft sampling. These are six-sample means on warm servers, not complete tasks or cold swaps.
+
+| Swift profile | Draft sampling | Generation t/s | Warm request seconds |
+|---|---|---:|---:|
+| 128K f16 | greedy | 32.39 | 21.44 |
+| 128K f16 | probabilistic | 35.46 | 20.06 |
+| 256K q8_0 | greedy | 31.85 | 21.75 |
+| 256K q8_0 | probabilistic | 33.35 | 21.03 |
+
+The new mode adds 9.5% generation / 6.4% lower warm request time on f16, and 4.7% / 3.3% on q8. Q8 reasoning is nearly flat; gains depend on workload. Independent one/two/three-draft sweeps selected two for both cache types; f16 with one/three probabilistic drafts averaged 32.42/33.58 t/s, q8 31.63/33.01. At 64K depth, f16's separate non-MTP control is about 20% faster than q8, supporting a 128K speed profile alongside 256K capacity profiles. Existing Qwen/Agents tuning and client default selections remain unchanged.
+
+At 67,158 real-text input tokens and a 256-token output cap, f16 MTP raised generation from 14.59 to 26.72 t/s (+83.1%), but draft-model prefill increased prompt time from 74.11 to 86.33 seconds. Total uncached request time rose from 91.65 to 95.96 seconds (+4.7%). Prefer a non-MTP control when evaluating long fresh prompts with short answers; faster decoding alone does not prove faster requests. This is not a cached-request or complete-task result.
+
+Both Swift and base Qwen passed 6/6 clarified low-effort JSON-answer checks, averaging 7.31/7.21 seconds respectively: no complete-answer latency gain was established. Swift's 128K/256K near-limit text fills, three projector logo checks, live tool round trips, and Pi request mappings passed. The 256K MTP profile had only ~1.6 GiB free before cleanup. A known wider sparse-mask test still fails; sparse attention remains disabled. See the [detailed report](docs/benchmarks/2026-10-07/README.md) and [188 recorded measurements/checks](docs/benchmarks/2026-10-07/results.jsonl) for scope, variability, and rollback.
+
+#### Qwen/Agents paired and tuned measurements: 2026-10-01–02
 
 Candidate build `5fc4f3c8c` / 2415, normal oneDNN attention dispatch, full GPU offload, flash attention, and one slot. Prompt columns use the tuned `-b 4096 -ub 1024`; gains compare against the same candidate at 2048/512. The decode column is a separate, non-MTP control generating 128 tokens at 64,000-token KV depth with 2048/512 batching. All rates are tokens/second.
 
@@ -70,8 +101,8 @@ The real-text MTP sweep used the production Qwen profiles, three workloads with 
 | Profile | Batch / microbatch | Maximum MTP drafts | Generation t/s | Warm request seconds |
 |---|---:|---:|---:|---:|
 | Old f16 thinking, build 1999 | 2048 / 512 | 3 | 27.59 | 26.02 |
-| Current f16 thinking, build 2415 | 4096 / 1024 | 2 | 30.96 | 22.60 |
-| Current q8 MTP, build 2415 | 4096 / 1024 | 1 | 29.05 | 23.65 |
+| October 2 f16 thinking, build 2415 | 4096 / 1024 | 2 | 30.96 | 22.60 |
+| October 2 q8 MTP, build 2415 | 4096 / 1024 | 1 | 29.05 | 23.65 |
 
 The selected f16 combination improves mean generation by about 12% and lowers warm request time by about 13% versus the old configuration. This combines build, batch, and draft-horizon changes. On the candidate, f16 with three drafts averaged 27.84 t/s; q8 with two averaged 28.78 t/s, nearly tied with one. Horizons remain workload-dependent; four drafts were slower than non-speculative decoding on both cache types.
 
@@ -192,6 +223,7 @@ separately and is not part of this comparison.
 - Use `gemma-4-e4b` for quick questions, summaries, transformations, and routine edits. Its small VRAM footprint and earlier measurements of 1710 t/s prompt processing and 76.5 t/s generation make it the fast path when the task does not need a larger model; it was not newly throughput-profiled in October.
 - Use `qwen3.6-35b-a3b` as the balanced general-purpose option. Its Unsloth UD-Q4_K_S quant is the fastest large Qwen configuration measured here so far, and its projector, developer-role handling, reasoning extraction, and tool calls are validated.
 - Use `qwen3.8-27b-think` as the daily Qwen profile for OpenCode, Pi, and other reasoning-heavy agent work when 128K context is enough. Its f16 KV cache decoded about 20% faster than q8_0 at 64K depth in the paired October tests. It now uses two MTP drafts and 4096/1024 batching; the 256K q8 MTP profile uses one draft after a near-tied one/two-draft real-text sweep. Use `qwen3.8-27b-mtp` when 256K context is required and `qwen3.8-27b` as the conservative non-speculative fallback. Horizons remain workload-dependent.
+- Try `swift-1.5-27b-think` for Swift's 128K f16 speed profile, or `swift-1.5-27b-mtp` for 256K capacity. Both use two probabilistic drafts; the plain `swift-1.5-27b` is a 256K q8 non-MTP fallback. Use low effort for brief answers, and compare whole-request time for long fresh prompts: the 67K/256-output f16 control decoded faster with MTP but finished slower overall. Local bounded tests do not establish that Swift should replace your current agent default.
 - Use `nemotron-3.5-lightning` to try NVIDIA's text-only reasoning and agent model. Use the explicit `nemotron-3.5-lightning-mtp` alias only for MTP experiments; earlier SYCL tests were slower and intermittently stopped making progress on longer generations. The experimental MTP profile was not retested in October.
 - Try `muse-glimmer-30b` for agentic and multimodal work. Its profile includes the perception projector, native ATEM tool-call parsing, reasoning extraction, and the model authors' sampling defaults. Generation is usable at about 24.2 t/s, though prompt ingestion was relatively slow in the first local test.
 - Keep `glm-4.7-flash` as an independent second opinion.
@@ -217,6 +249,14 @@ Qwen3.8-27B tuning and usage notes:
 - A seeded code-review quality comparison used the same prompt, `reasoning_effort=low`, and a 3,200-token allowance for each presence penalty. Penalty 0 completed correctly in 2,733 tokens with all requested tests; 0.5 also completed but used 3,050 tokens and omitted one explicit edge-case test; 1.5 exhausted all 3,200 tokens, never reached the requested tests, and returned an implementation that failed to deduplicate tags within the first record. All Qwen3.8 profiles therefore use `--presence-penalty 0`.
 - Do not use `reasoning_effort=none` with this GGUF/template as a latency shortcut. In a direct control at presence penalty 0, it spent the full 2,200-token allowance in `reasoning_content` and returned no final answer. `low` is the verified short-reasoning setting; the hard `--reasoning-budget` remains the reliable upper bound.
 - Required-tool and complete tool-result round trips returned parsed `tool_calls`, separate `reasoning_content`, and a correct final answer with `reasoning_effort=low`. The F16 projector correctly identified the local llama.cpp logo, Pi returned the exact requested sentinel, and a real OpenCode run completed its `read` call and final response through the MTP alias.
+
+Swift 1.5 tuning and usage notes:
+
+- [Swift 1.5](https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-27B-GGUF) is a reasoning-compression fine-tune of Qwen3.8-27B. The local Q4_K_S model and F16 vision projector match the publisher's SHA-256 values; see [file provenance](docs/benchmarks/2026-10-07/model-provenance.json). Both files retain a stale `Miroslav 1.0` metadata label. The verified filenames/checksums identify this release; the label is not a reason to edit the weights.
+- This GGUF retains one NextN/MTP block, with a Q4_0 projection rather than the base Qwen GGUF's Q8_0. Its mixed tensor quantization and embedded template also differ. Swift therefore gets separate profiles and its own draft-horizon sweep, not a replacement of existing Qwen aliases.
+- The native context is 262144 tokens. The plain and `-mtp` profiles use 256K q8_0 KV; `-think` uses 128K f16 KV. All attach Swift's own projector, retain one slot/full GPU offload/flash attention, and use the published temperature 1, top-p 0.95, top-k 20, min-p 0, presence penalty 0, repeat penalty 1 recipe. Reasoning ceilings remain 2048 for 256K profiles and 8192 for `-think`.
+- Swift's template accepts `low`, `medium`, and `xhigh` (default), not literal `high`. Generated Pi metadata maps high/xhigh/max to xhigh and minimal to low; OpenCode gets explicit low/medium/xhigh variants with high mapped to xhigh. Use low for latency-sensitive requests. Pi conservatively uses system messages because the embedded template lacks a developer branch; native llama.cpp's developer-to-system mapping preserved instructions in the old/new controls. Pi off sends `none`, but the actual v1 probe still emitted reasoning; it is not a reliable no-thinking switch. A client effort setting does not replace the hard server reasoning ceiling.
+- Publisher-reported token savings are not a local Q4_K_S quality or whole-agent speed guarantee. Bounded throughput, complete-answer checks, and vision/tool compatibility are recorded separately in the [October 7 report](docs/benchmarks/2026-10-07/README.md). The weights use Swift Open License v1 and remain outside Git.
 
 Agents-A1 tuning and usage notes:
 
@@ -252,7 +292,15 @@ For comparison, LM Studio's bundled Vulkan llama.cpp measured ~9 t/s in the hist
 
 ## llama.cpp update notes
 
-Current local build: `5fc4f3c8c` (`b11337-10-g5fc4f3c8c`, local binary build 2415, `0.5.0-dev`), built with IntelLLVM 2026.1.1. `llama.cpp/build` is a symlink to the validated `build-sycl-20261001` directory.
+Current local build: `18b5f8b18` (`b11477-1-g18b5f8b18`, local binary build 2546, `0.6.0-dev`), built with IntelLLVM 2026.1.1. `llama.cpp/build` is a symlink to the validated `build-sycl-20261007` directory.
+
+### Maintenance and Swift profiling record: 2026-10-07
+
+- Fast-forwarded clean upstream source by 131 commits from `5fc4f3c8c` to `18b5f8b18`; separately rebuilt `llama-server`, `llama-bench`, and `test-backend-ops` with the unchanged oneAPI/driver stack. Old binaries and an old-build-compatible Swift config are retained for rollback.
+- Relevant upstream work includes avoiding slow oneDNN reference kernels, Q8_0 weight-operator ESIMD/wide-load improvements, and opt-in probabilistic draft sampling with rejection verification. Direct Swift and repeated Qwen/Agents controls were essentially flat; the measured useful new-build gain is probabilistic MTP, not a large blanket SYCL speedup. See the [upstream references and full methods](docs/benchmarks/2026-10-07/README.md).
+- Swift alone gets 4096/2048 batching and two probabilistic drafts on both MTP aliases. The 128K f16 profile measured 35.46 t/s; 256K q8 measured 33.35 t/s on bounded warm requests. All eleven existing profiles and client default selections remain unchanged.
+- Selected native core correctness passed 3177/3177 and dense attention 119/119; the known wider sparse-mask case still fails (0/1 targeted retest), and sparse attention remains disabled. Swift's full 128K/256K allocations passed near-limit text checks; the q8/MTP profile has only ~1.6 GiB end-of-run headroom.
+- Both Swift and base Qwen scored 6/6 on clarified bounded low-effort JSON-answer checks, averaging 7.31/7.21 seconds: no complete-answer latency gain was established. Tool/vision integration, template effort mapping, and Pi request serialization were checked separately; long agent runs and image/video-at-full-context stress were not performed.
 
 ### Maintenance and profiling record: 2026-10-01–02
 
@@ -329,7 +377,7 @@ git fetch --tags origin master
 git checkout master
 git pull --ff-only origin master
 source /opt/intel/oneapi/setvars.sh > /dev/null
-task_build_dir=build-sycl-20261001
+task_build_dir=build-sycl-20261007
 cmake -S . -B "$task_build_dir" \
   -DCMAKE_C_COMPILER=icx \
   -DCMAKE_CXX_COMPILER=icpx \
@@ -340,18 +388,18 @@ cmake -S . -B "$task_build_dir" \
   -DGGML_SYCL_GRAPH=ON \
   -DGGML_SYCL_HOST_MEM_FALLBACK=ON \
   -DCMAKE_BUILD_TYPE=Release
-cmake --build "$task_build_dir" --config Release --target llama-server llama-bench test-backend-ops -j 6
+cmake --build "$task_build_dir" --config Release --target llama-server llama-bench test-backend-ops -j 4
 ```
 
-The directory above is now active; do not reuse it for the next update while a model is running. Stage a fresh build, pause llama-swap for isolated comparisons, and switch the stable `build` link only after validation. Avoid `cmake --fresh -B build` against the active symlink. The saved original is `build-original-20261001`; the independent benchmark snapshot is `build-b10931-20260912`. Follow the [rollback procedure](docs/benchmarks/2026-10-01/README.md#deployment-and-rollback) rather than deleting either directory.
+The directory above is now active; do not reuse it for the next update while a model is running. Stage a fresh build, pause llama-swap for isolated comparisons, and switch the stable `build` link only after validation. Avoid `cmake --fresh -B build` against the active symlink. The preceding build is `build-sycl-20261001`, with its saved link at `build-link-before-20261007`; older `build-original-20261001` and `build-b10931-20260912` snapshots also remain. Follow the [current rollback procedure](docs/benchmarks/2026-10-07/README.md#deployment-and-rollback) instead of deleting snapshots. Rolling back the binary also requires removing the unsupported new sampling flag via the saved compatible config.
 
 Notes from the rebuild:
 
 - Ubuntu package `libze-dev` is installed, so CMake enables `GGML_SYCL_SUPPORT_LEVEL_ZERO_API` and links the direct Level Zero allocation path.
 - `GGML_SYCL_F16=ON` remains enabled. Upstream recommends testing both modes because FP16 can improve prompt processing depending on the model.
 - Keep `GGML_SYCL_DEVICE_ARCH` unset for this build. The current upstream CMake logic skips `-ze-intel-greater-than-4GB-buffer-required` for `spir64_gen` AOT builds, which made the local large-model configuration unsuitable for the attempted `bmg-g21` AOT build. The normal JIT path is cached after its initial device compilation.
-- October's candidate embeds downloaded upstream prebuilt llama-ui assets (its stamp requests `b2415`); earlier rebuilds used npm or cached assets. The stamp alone is not proof of the exact downloaded UI revision. Native binary provenance is verified independently.
-- Current validation reports `SYCL0: Intel(R) Graphics [0xe223]` with 32656 MiB, and `llama-server --version` reports IntelLLVM 2026.1.1, build 2415, commit `5fc4f3c8c`.
+- October 7 embeds downloaded upstream prebuilt llama-ui assets: the requested `b2546` archive resolved to the `latest` fallback and its checksum was verified. Earlier rebuilds used npm or cached assets. The stamp alone is not proof of the exact downloaded UI revision. Native binary provenance is verified independently.
+- Current validation reports `SYCL0: Intel(R) Graphics [0xe223]` with 32656 MiB, and `llama-server --version` reports IntelLLVM 2026.1.1, build 2546, commit `18b5f8b18`.
 
 ### Historical MTP speculative decoding (retired)
 
@@ -442,6 +490,9 @@ opencode -m local-b70/qwen3.6-35b-a3b        # interactive TUI, balanced Qwen Mo
 opencode -m local-b70/qwen3.8-27b             # interactive TUI, stable Qwen3.8 profile
 opencode -m local-b70/qwen3.8-27b-mtp         # interactive TUI, 256K Qwen3.8 + MTP
 opencode -m local-b70/qwen3.8-27b-think       # interactive TUI, recommended 128K agent profile
+opencode -m local-b70/swift-1.5-27b-think     # interactive TUI, Swift 128K f16 profile
+opencode -m local-b70/swift-1.5-27b-mtp       # interactive TUI, Swift 256K + MTP
+opencode -m local-b70/swift-1.5-27b           # interactive TUI, Swift non-MTP fallback
 opencode -m local-b70/agents-a1               # interactive TUI, long-horizon agent model
 opencode -m local-b70/nemotron-3.5-lightning  # interactive TUI, stable Nemotron profile
 opencode -m local-b70/nemotron-3.5-lightning-mtp # interactive TUI, experimental MTP
@@ -453,6 +504,7 @@ opencode run -m local-b70/qwen3.6-35b-a3b "..." # one-shot, balanced Qwen MoE
 opencode run -m local-b70/qwen3.8-27b "..."  # one-shot, stable Qwen3.8
 opencode run -m local-b70/qwen3.8-27b-mtp "..." # one-shot, 256K Qwen3.8 + MTP
 opencode run -m local-b70/qwen3.8-27b-think "..." # one-shot, recommended 128K agent profile
+opencode run -m local-b70/swift-1.5-27b-think --variant low "..." # Swift, brief reasoning
 opencode run -m local-b70/agents-a1 "..."    # one-shot, long-horizon agent model
 opencode run -m local-b70/nemotron-3.5-lightning "..." # one-shot, Nemotron
 opencode run -m local-b70/nemotron-3.5-lightning-mtp "..." # one-shot, experimental MTP
@@ -472,6 +524,9 @@ pi --provider local-b70 --model qwen3.6-35b-a3b
 pi --provider local-b70 --model qwen3.8-27b
 pi --provider local-b70 --model qwen3.8-27b-mtp
 pi --provider local-b70 --model qwen3.8-27b-think
+pi --provider local-b70 --model swift-1.5-27b-think --thinking low
+pi --provider local-b70 --model swift-1.5-27b-mtp
+pi --provider local-b70 --model swift-1.5-27b
 pi --provider local-b70 --model agents-a1
 pi --provider local-b70 --model nemotron-3.5-lightning
 pi --provider local-b70 --model nemotron-3.5-lightning-mtp

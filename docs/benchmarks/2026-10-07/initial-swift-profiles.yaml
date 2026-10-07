@@ -1,0 +1,37 @@
+# Historical benchmark input only, not the live llama-swap registry.
+# Matches the original Swift profiles used for old-build and greedy controls.
+# --build replaces the executable path; sweep arguments override batch/horizon.
+models:
+  swift-1.5-27b-mtp:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/Swift-1.5-Qwen3.8-27B-Q4_K_S.gguf
+      --mmproj /home/jeff/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/mmproj-Swift-1.5-Qwen3.8-27B-F16.gguf
+      -ngl 999 -c 262144 -ctk q8_0 -ctv q8_0 -fa on
+      -b 4096 -ub 1024 --parallel 1 --metrics
+      --host 127.0.0.1 --port 9000 --jinja
+      --reasoning on --reasoning-format deepseek
+      --reasoning-budget 2048 --reasoning-preserve
+      --spec-type draft-mtp --spec-draft-n-max 1
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0
+      --presence-penalty 0 --repeat-penalty 1.0
+      --alias swift-1.5-27b-mtp"
+
+  swift-1.5-27b-think:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/Swift-1.5-Qwen3.8-27B-Q4_K_S.gguf
+      --mmproj /home/jeff/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/mmproj-Swift-1.5-Qwen3.8-27B-F16.gguf
+      -ngl 999 -c 131072 -ctk f16 -ctv f16 -fa on
+      -b 4096 -ub 1024 --parallel 1 --metrics
+      --host 127.0.0.1 --port 9000 --jinja
+      --reasoning on --reasoning-format deepseek
+      --reasoning-budget 8192 --reasoning-preserve
+      --spec-type draft-mtp --spec-draft-n-max 2
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0
+      --presence-penalty 0 --repeat-penalty 1.0
+      --alias swift-1.5-27b-think"

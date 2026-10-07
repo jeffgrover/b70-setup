@@ -149,6 +149,21 @@ model_metadata = {
     },
 }
 
+for qwen_id in ("qwen3.8-27b", "qwen3.8-27b-mtp", "qwen3.8-27b-think"):
+    swift_id = qwen_id.replace("qwen3.8", "swift-1.5")
+    model_metadata[swift_id] = {
+        **model_metadata[qwen_id],
+        "name": model_metadata[qwen_id]["name"].replace("Qwen3.8-27B", "Swift 1.5 Qwen3.8-27B"),
+        "thinkingLevelMap": {
+            "off": "none", "minimal": "low", "low": "low", "medium": "medium",
+            "high": "xhigh", "xhigh": "xhigh", "max": "xhigh",
+        },
+        "compat": {
+            "supportsDeveloperRole": False,
+            "supportsReasoningEffort": True,
+        },
+    }
+
 
 def read_json(path, default):
     if not path.exists():
@@ -234,7 +249,7 @@ def pi_model_config(model_id):
         "maxTokens": limit["output"],
     }
     metadata = model_metadata.get(model_id, {})
-    for key in ("name", "reasoning", "input", "compat"):
+    for key in ("name", "reasoning", "input", "compat", "thinkingLevelMap"):
         if key in metadata:
             config[key] = metadata[key]
     return config
@@ -321,6 +336,12 @@ def update_opencode():
                     "output": ["text"],
                 },
             })
+        if model_id.startswith("swift-1.5-"):
+            model_config["variants"] = {
+                effort: {"reasoningEffort": mapped}
+                for effort, mapped in (("low", "low"), ("medium", "medium"),
+                                       ("high", "xhigh"), ("xhigh", "xhigh"))
+            }
         provider_models[model_id] = model_config
 
     retired_model_refs = {
