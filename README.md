@@ -4,7 +4,7 @@ Single-port OpenAI-compatible chat-completions endpoint at `http://127.0.0.1:808
 
 See the [B70 agentic LLM tuning report](docs/b70-agentic-tuning-report.pdf) for the earlier profiling history, before/after client comparison, charts, subjective scores, and recommended operating procedure. The self-contained [HTML source](docs/b70-agentic-tuning-report.html) is included alongside the PDF.
 
-The latest [October 7 Swift integration and SYCL tuning pass](docs/benchmarks/2026-10-07/README.md) adds Swift 1.5 Qwen3.8-27B and deploys build 2546 / `18b5f8b18`. Source-only throughput is essentially flat; 2048-token microbatches improve 8K prompt ingestion by about 10% over the existing 1024 setting. The new probabilistic MTP mode improves matched f16 generation by 9.5% and q8 generation by 4.7% on bounded real-text requests. Near-limit context, tools, vision, and client mapping checks passed; 256K MTP headroom is tight and no whole-agent speedup is claimed.
+The latest [October 27 llama.cpp update, SYCL tuning, and Flint integration](docs/benchmarks/2026-10-27/README.md) deploys build 3014 / `8ca4060b7`. New B70 XMX multi-column kernels improve Swift MTP real-text throughput by 22% at two drafts; three drafts are 5% faster again, so the q8 MTP alias now uses three. Runtime graph capture was slightly slower. Q8 prompt processing improved 11–15% over today's saved binary at long prompts. Flint Q4_K_M is tuned to 2048/1024 batching and f16 KV at a validated 32K context; f16 measured 23% faster decoding than q8 at 32K depth. The earlier [October 7 Swift integration and SYCL tuning pass](docs/benchmarks/2026-10-07/README.md) remains the prior benchmark baseline.
 
 The previous [October 1–2 Qwen/Agents tuning pass](docs/benchmarks/2026-10-01/README.md) retains paired old/new measurements and the earlier 18–34% batch gains. Those historical results remain separately labeled below.
 
@@ -16,7 +16,7 @@ The previous [October 1–2 Qwen/Agents tuning pass](docs/benchmarks/2026-10-01/
 | GPU | Intel Arc Pro B70 (Battlemage, 32 GB VRAM, device id `0xe223`) |
 | Connection | USB4 → eGPU enclosure |
 | OS | Ubuntu 26.04 LTS "resolute", kernel 7.0.0-x, `xe` driver |
-| Compute runtime | Intel oneAPI compiler/MKL 2026.1, oneDNN 2026.0, Level-Zero/OpenCL packages `26.05.37020.3-1` |
+| Compute runtime | IntelLLVM 2026.2.0, oneMKL 2026.2, oneDNN 2026.1; Level Zero 1.14.37020 |
 
 ## Architecture
 
@@ -44,6 +44,7 @@ Only one llama-server runs at a time. First request to a different model trigger
 | `swift-1.5-27b` | `~/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/Swift-1.5-Qwen3.8-27B-Q4_K_S.gguf` + `mmproj-Swift-1.5-Qwen3.8-27B-F16.gguf` | Q4_K_S | 256 K (q8_0 KV) | ~27.2 GiB (October 7 shallow vision/tool check) |
 | `swift-1.5-27b-mtp` | Same Swift GGUF + projector | Q4_K_S + MTP | 256 K (q8_0 KV) | ~30.3 GiB (October 7 text stress) |
 | `swift-1.5-27b-think` | Same Swift GGUF + projector | Q4_K_S + MTP | 128 K (f16 KV) | ~27.5 GiB (October 7 text stress) |
+| `flint` | `~/.lmstudio/models/lmstudio-community/flint-GGUF/flint-Q4_K_M.gguf` | Q4_K_M | 32 K (f16 KV) | 40B GGUF; comparative profile data in October 27 report |
 | `agents-a1` | `~/.lmstudio/models/InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~25.7 GiB (October text stress) |
 | `nemotron-3.5-lightning` | `~/.lmstudio/models/bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_K_S.gguf` | Q4_K_S | 256 K (f16 KV) | ~24.3 GB |
 | `nemotron-3.5-lightning-mtp` | Same MTP-preserving GGUF | Q4_K_S + MTP | 256 K (f16 KV) | ~24.3 GB |
@@ -292,7 +293,16 @@ For comparison, LM Studio's bundled Vulkan llama.cpp measured ~9 t/s in the hist
 
 ## llama.cpp update notes
 
-Current local build: `18b5f8b18` (`b11477-1-g18b5f8b18`, local binary build 2546, `0.6.0-dev`), built with IntelLLVM 2026.1.1. `llama.cpp/build` is a symlink to the validated `build-sycl-20261007` directory.
+Current local build: `8ca4060b7` (local binary build 3014, `0.7.0-dev`), built with IntelLLVM 2026.2.0, oneMKL 2026.2, and oneDNN 2026.1. `llama.cpp/build` points to the validated `build-sycl-20261027` directory. See the [October 27 build and profiling report](docs/benchmarks/2026-10-27/README.md).
+
+### Maintenance, profiling, and Flint integration: 2026-10-27
+
+- Fast-forwarded clean upstream from `18b5f8b18` to `8ca4060b7` and built `llama-server`, `llama-bench`, and `test-backend-ops` with SYCL, Level Zero, oneDNN, FP16 kernels, and SYCL graph support. The server UI assets were unavailable from the restricted build network; its inference API works.
+- The largest directly relevant upstream change is [multi-column Q4_K_S/Q8_0 XMX ESIMD kernels](https://github.com/ggml-org/llama.cpp/pull/29864), which target verification and short prompt batches. Q8 fast dequant, graph capture support, and several reorder/attention fixes also landed. Runtime graph capture remains disabled because the local A/B was 1.6% slower overall.
+- Selected matrix-multiply backend correctness passed 2,273/2,273 cases. Against the saved October 7 binary on the current machine/toolchain, long-prompt Q8 rates improved 11–15%; f16 improved 7–17%. Differences from October 7's published rates also include the changed compiler and oneAPI libraries, so the new/old comparison is the controlled source-build comparison for this pass.
+- Swift Q4_K_S q8-MTP matched real-text runs averaged 25.21 t/s on the saved build, 30.80 t/s with two probabilistic drafts on the new build (+22%), and 32.44 t/s with three (+5% over two). Four drafts regressed. The two-draft h2 profile remains competitive across tasks; three drafts favor coding/agent workloads. These are short bounded throughput tests, not complete-task quality or latency claims.
+- The `swift-1.5-27b-mtp` alias now uses three probabilistic drafts, based on this matched six-sample sweep. The f16 thinking alias remains at two because the horizon comparison was performed on q8 KV only.
+- Added and profiled `flint` for the local RecursiveSI Flint Q4_K_M GGUF. The configured profile now uses 32K f16 KV and 2048/1024 batching: f16 was 23% faster than q8 at 32K decode depth, and the larger microbatch improved 8K prompt rate by 14%. A 262K context load caused OS memory pressure; full-context and sustained-load checks remain undone. See the [Flint sweep](docs/benchmarks/2026-10-27/README.md#flint-throughput-and-parameter-sweep).
 
 ### Maintenance and Swift profiling record: 2026-10-07
 
@@ -553,7 +563,7 @@ It updates:
 | Pi agent auth | `~/.pi/agent/auth.json` |
 | opencode provider and per-model context/output limits | `~/.config/opencode/opencode.json` |
 
-For both clients, context and maximum-output limits are set from each model profile's `-c` or `--ctx-size` value. Existing per-model fields are preserved; maintained metadata exposes reasoning, tool use, and the appropriate text/vision modalities for Qwen, Agents-A1, Nemotron, and Muse. The command also removes the retired Qwen 27B and Nemotron IDs from old local-provider entries. Run it after adding, renaming, removing, or changing a model.
+For both clients, context and maximum-output limits are set from each model profile's `-c` or `--ctx-size` value. Existing per-model fields are preserved; maintained metadata exposes reasoning, tool use, and the appropriate text/vision modalities for Qwen, Flint, Agents-A1, Nemotron, and Muse. The command also removes the retired Qwen 27B and Nemotron IDs from old local-provider entries. Run it after adding, renaming, removing, or changing a model.
 
 The repository keeps sanitized snapshots in `configs/pi-models.json` and `configs/opencode.json`. Refresh them from the live registry before committing configuration changes:
 

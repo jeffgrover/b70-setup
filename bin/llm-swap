@@ -118,6 +118,11 @@ model_metadata = {
             "supportsReasoningEffort": True,
         },
     },
+    "flint": {
+        "name": "Recursive Flint 40B Q4_K_M (32K)",
+        "reasoning": True,
+        "input": ["text"],
+    },
     "agents-a1": {
         "name": "Agents-A1 Q4_K_M (256K)",
         "reasoning": True,

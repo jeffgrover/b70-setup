@@ -149,7 +149,7 @@ models:
       --host 127.0.0.1 --port 9000 --jinja
       --reasoning on --reasoning-format deepseek
       --reasoning-budget 2048 --reasoning-preserve
-      --spec-type draft-mtp --spec-draft-n-max 2 --spec-draft-sampling probabilistic
+      --spec-type draft-mtp --spec-draft-n-max 3 --spec-draft-sampling probabilistic
       --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0
       --presence-penalty 0 --repeat-penalty 1.0
       --alias swift-1.5-27b-mtp"
@@ -170,6 +170,22 @@ models:
       --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0
       --presence-penalty 0 --repeat-penalty 1.0
       --alias swift-1.5-27b-think"
+
+  # Flint Q4_K_M: 32K f16 KV and 2048/1024 batching selected by the Oct 27 B70 sweep.
+  # A 262K load triggered OS memory pressure; 32K is the validated conservative context.
+  flint:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/lmstudio-community/flint-GGUF/flint-Q4_K_M.gguf
+      -ngl 999 -c 32768 -ctk f16 -ctv f16 -fa on
+      -b 2048 -ub 1024 --parallel 1 --metrics
+      --host 127.0.0.1 --port 9000 --jinja
+      --reasoning on --reasoning-format deepseek
+      --reasoning-budget 2048 --reasoning-preserve
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0
+      --alias flint"
 
   # 2026-10-02: larger batching improved pp8K ~34% and pp64K ~28%; sampler/KV/context unchanged.
   agents-a1:

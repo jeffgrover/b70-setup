@@ -142,6 +142,16 @@
           }
         },
         {
+          "id": "flint",
+          "contextWindow": 32768,
+          "maxTokens": 32768,
+          "name": "Recursive Flint 40B Q4_K_M (32K)",
+          "reasoning": true,
+          "input": [
+            "text"
+          ]
+        },
+        {
           "id": "agents-a1",
           "name": "Agents-A1 Q4_K_M (256K)",
           "contextWindow": 262144,

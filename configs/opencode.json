@@ -206,6 +206,27 @@
             }
           }
         },
+        "flint": {
+          "name": "Recursive Flint 40B Q4_K_M (32K)",
+          "limit": {
+            "context": 32768,
+            "output": 32768
+          },
+          "attachment": false,
+          "reasoning": true,
+          "tool_call": true,
+          "interleaved": {
+            "field": "reasoning_content"
+          },
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        },
         "agents-a1": {
           "name": "Agents-A1 Q4_K_M (256K)",
           "limit": {
