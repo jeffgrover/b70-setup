@@ -143,9 +143,9 @@
         },
         {
           "id": "flint",
-          "contextWindow": 32768,
-          "maxTokens": 32768,
-          "name": "Recursive Flint 40B Q4_K_M (32K)",
+          "contextWindow": 98304,
+          "maxTokens": 98304,
+          "name": "Recursive Flint 40B Q4_K_M (96K q8_0 evaluation)",
           "reasoning": true,
           "input": [
             "text"
@@ -209,6 +209,34 @@
           "name": "GLM-4.7-Flash Q4_K_M (128K)",
           "contextWindow": 131072,
           "maxTokens": 131072
+        },
+        {
+          "id": "nanbeige4.3-33b",
+          "name": "Nanbeige4.3-33B Q4_K_S (64K)",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false
+          },
+          "contextWindow": 65536,
+          "maxTokens": 65536
+        },
+        {
+          "id": "ripple-65b-preview",
+          "name": "Ripple 65B Preview AD-IQ3_XXS (8K, coding)",
+          "reasoning": true,
+          "input": [
+            "text"
+          ],
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false
+          },
+          "contextWindow": 8192,
+          "maxTokens": 8192
         }
       ]
     }

@@ -171,19 +171,19 @@ models:
       --presence-penalty 0 --repeat-penalty 1.0
       --alias swift-1.5-27b-think"
 
-  # Flint Q4_K_M: 32K f16 KV and 2048/1024 batching selected by the Oct 27 B70 sweep.
-  # A 262K load triggered OS memory pressure; 32K is the validated conservative context.
+  # Flint Q4_K_M: 96K q8 KV for the evaluation retry; retain 2048/1024 batching.
+  # Prior Oct 27 tests validated 32K f16 and 64K q8; avoid the memory-heavy 262K load.
   flint:
     proxy: http://127.0.0.1:9000
     ttl: 600
     cmd: >
       bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
       -m /home/jeff/.lmstudio/models/lmstudio-community/flint-GGUF/flint-Q4_K_M.gguf
-      -ngl 999 -c 32768 -ctk f16 -ctv f16 -fa on
-      -b 2048 -ub 1024 --parallel 1 --metrics
+      -ngl 999 -c 98304 -ctk q8_0 -ctv q8_0 -fa on
+      -b 2048 -ub 1024 --parallel 1 --n-predict -1 --metrics
       --host 127.0.0.1 --port 9000 --jinja
       --reasoning on --reasoning-format deepseek
-      --reasoning-budget 2048 --reasoning-preserve
+      --reasoning-budget 512 --no-reasoning-preserve
       --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0
       --alias flint"
 
@@ -330,3 +330,37 @@ models:
       --host 127.0.0.1 --port 9000
       --jinja
       --alias glm-4.7-flash"
+
+  # Dense 33B: 64K q8 KV is about 6.9 GiB; leave VRAM for weights and compute.
+  # Use the embedded chat template for reasoning and tool calls.
+  nanbeige4.3-33b:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/bartowski/Nanbeige_Nanbeige4.3-33B-GGUF/Nanbeige_Nanbeige4.3-33B-Q4_K_S.gguf
+      --override-kv tokenizer.ggml.add_space_prefix=bool:false
+      -ngl 999 -c 65536 -ctk q8_0 -ctv q8_0 -fa on
+      -b 2048 -ub 512 --parallel 1 --n-predict -1 --metrics
+      --host 127.0.0.1 --port 9000 --jinja
+      --reasoning on --reasoning-format deepseek
+      --reasoning-budget 4096 --no-reasoning-preserve
+      --temp 1.0 --top-p 0.95 --top-k 0 --min-p 0
+      --repeat-penalty 1.0 --presence-penalty 0
+      --alias nanbeige4.3-33b"
+
+  # Ripple is a dense 65B model; 8K context and 512/128 batching loaded on the
+  # 32 GB B70, and the template passed a forced tool-call check.
+  ripple-65b-preview:
+    proxy: http://127.0.0.1:9000
+    ttl: 600
+    cmd: >
+      bash -c "source /opt/intel/oneapi/setvars.sh > /dev/null && exec /home/jeff/Code/intel/llama.cpp/build/bin/llama-server
+      -m /home/jeff/.lmstudio/models/AtomicChat/Ripple-65B-Preview-GGUF/Ripple-65B-Preview-AD-IQ3_XXS.gguf
+      -ngl 999 -c 8192 -ctk q8_0 -ctv q8_0 -fa on
+      -b 512 -ub 128 --parallel 1 --n-predict -1 --metrics
+      --host 127.0.0.1 --port 9000 --jinja
+      --reasoning on --reasoning-format deepseek --reasoning-budget 2048
+      --temp 0.7 --top-p 0.95 --top-k 40 --min-p 0
+      --repeat-penalty 1.0 --presence-penalty 0
+      --alias ripple-65b-preview"

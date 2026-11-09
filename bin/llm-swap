@@ -82,6 +82,26 @@ retired_model_ids = {
 }
 
 model_metadata = {
+    "ripple-65b-preview": {
+        "name": "Ripple 65B Preview AD-IQ3_XXS (8K, coding)",
+        "reasoning": True,
+        "input": ["text"],
+        "compat": {
+            "supportsDeveloperRole": False,
+            "supportsReasoningEffort": False,
+        },
+    },
+    "nanbeige4.3-33b": {
+    "name": "Nanbeige4.3-33B Q4_K_S (64K)",
+    "reasoning": True,
+    "input": [
+        "text"
+    ],
+    "compat": {
+        "supportsDeveloperRole": False,
+        "supportsReasoningEffort": False
+    }
+},
     "qwen3.6-35b-a3b": {
         "name": "Qwen3.6-35B-A3B UD-Q4_K_S (256K, vision)",
         "reasoning": True,
@@ -119,7 +139,7 @@ model_metadata = {
         },
     },
     "flint": {
-        "name": "Recursive Flint 40B Q4_K_M (32K)",
+        "name": "Recursive Flint 40B Q4_K_M (96K q8_0 evaluation)",
         "reasoning": True,
         "input": ["text"],
     },

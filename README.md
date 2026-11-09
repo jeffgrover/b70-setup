@@ -4,7 +4,7 @@ Single-port OpenAI-compatible chat-completions endpoint at `http://127.0.0.1:808
 
 See the [B70 agentic LLM tuning report](docs/b70-agentic-tuning-report.pdf) for the earlier profiling history, before/after client comparison, charts, subjective scores, and recommended operating procedure. The self-contained [HTML source](docs/b70-agentic-tuning-report.html) is included alongside the PDF.
 
-The latest [October 27 llama.cpp update, SYCL tuning, and Flint integration](docs/benchmarks/2026-10-27/README.md) deploys build 3014 / `8ca4060b7`. New B70 XMX multi-column kernels improve Swift MTP real-text throughput by 22% at two drafts; three drafts are 5% faster again, so the q8 MTP alias now uses three. Runtime graph capture was slightly slower. Q8 prompt processing improved 11–15% over today's saved binary at long prompts. Flint Q4_K_M is tuned to 2048/1024 batching and f16 KV at a validated 32K context; f16 measured 23% faster decoding than q8 at 32K depth. The earlier [October 7 Swift integration and SYCL tuning pass](docs/benchmarks/2026-10-07/README.md) remains the prior benchmark baseline.
+The latest [November 8 llama.cpp/SYCL update and Ripple integration](docs/benchmarks/2026-11-08/README.md) deploys build 3279 / `7d7f02875`. Matched Qwen controls were effectively flat against October 27, so this is mainly a compatibility and kernel-correctness update rather than a blanket speedup. Ripple 65B Preview AD-IQ3_XXS now loads at 8K context with q8 KV; an OpenAI-format tool call passed through the live llama-swap endpoint. The earlier [October 27 profiling report](docs/benchmarks/2026-10-27/README.md) retains the Swift and Flint tuning measurements, and the [October 7 Swift report](docs/benchmarks/2026-10-07/README.md) remains the preceding benchmark baseline.
 
 The previous [October 1–2 Qwen/Agents tuning pass](docs/benchmarks/2026-10-01/README.md) retains paired old/new measurements and the earlier 18–34% batch gains. Those historical results remain separately labeled below.
 
@@ -44,7 +44,8 @@ Only one llama-server runs at a time. First request to a different model trigger
 | `swift-1.5-27b` | `~/.lmstudio/models/ukisai/Swift-1.5-Qwen3.8-27B-GGUF/Swift-1.5-Qwen3.8-27B-Q4_K_S.gguf` + `mmproj-Swift-1.5-Qwen3.8-27B-F16.gguf` | Q4_K_S | 256 K (q8_0 KV) | ~27.2 GiB (October 7 shallow vision/tool check) |
 | `swift-1.5-27b-mtp` | Same Swift GGUF + projector | Q4_K_S + MTP | 256 K (q8_0 KV) | ~30.3 GiB (October 7 text stress) |
 | `swift-1.5-27b-think` | Same Swift GGUF + projector | Q4_K_S + MTP | 128 K (f16 KV) | ~27.5 GiB (October 7 text stress) |
-| `flint` | `~/.lmstudio/models/lmstudio-community/flint-GGUF/flint-Q4_K_M.gguf` | Q4_K_M | 32 K (f16 KV) | 40B GGUF; comparative profile data in October 27 report |
+| `flint` | `~/.lmstudio/models/lmstudio-community/flint-GGUF/flint-Q4_K_M.gguf` | Q4_K_M | 96 K (q8_0 KV; current evaluation profile) | 40B GGUF; prior 32K f16 and 64K q8 runs in October 27 report |
+| `ripple-65b-preview` | `~/.lmstudio/models/AtomicChat/Ripple-65B-Preview-GGUF/Ripple-65B-Preview-AD-IQ3_XXS.gguf` | AD-IQ3_XXS | 8 K (q8_0 KV) | 28 GB file; ~11.6 t/s in one warm tool-call check; peak VRAM not measured |
 | `agents-a1` | `~/.lmstudio/models/InternScience/Agents-A1-Q4_K_M-GGUF/Agents-A1-Q4_K_M.gguf` | Q4_K_M | 256 K (f16 KV) | ~25.7 GiB (October text stress) |
 | `nemotron-3.5-lightning` | `~/.lmstudio/models/bartowski/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_K_S.gguf` | Q4_K_S | 256 K (f16 KV) | ~24.3 GB |
 | `nemotron-3.5-lightning-mtp` | Same MTP-preserving GGUF | Q4_K_S + MTP | 256 K (f16 KV) | ~24.3 GB |
@@ -53,7 +54,7 @@ Only one llama-server runs at a time. First request to a different model trigger
 | `gemma-4-31b-qat` | `~/.lmstudio/models/lmstudio-community/gemma-4-31B-it-QAT-GGUF/gemma-4-31B-it-QAT-Q4_0.gguf` | Q4_0 QAT | 128 K (q8_0 KV) | ~20 GB |
 | `glm-4.7-flash` | `~/.lmstudio/models/lmstudio-community/GLM-4.7-Flash-GGUF/GLM-4.7-Flash-Q4_K_M.gguf` | Q4_K_M | 128 K (q8_0 KV) | ~19 GB |
 
-October text-stress VRAM entries report whole-device usage before cleanup, including driver/background allocations; the plain Swift row is only a shallow vision/tool check. The other entries are earlier observations under different workloads. None is a peak guarantee. October 1 end-of-run free memory was about 5.7 GiB for Qwen f16/MTP, 3.4 GiB for Qwen q8/MTP, and 6.2 GiB for Agents-A1. October 7 Swift had about 4.4 GiB free on f16/MTP and only 1.6 GiB on q8/MTP. Projectors were loaded and Swift recognized a logo at shallow context, but image-at-full-context/video stress was not tested. Prefer f16 when 128K is enough; keep competing GPU workloads out of the 256K MTP profile, and use the plain profile or reduce microbatching if more headroom is needed.
+October text-stress VRAM entries report whole-device usage before cleanup, including driver/background allocations; the plain Swift row is only a shallow vision/tool check. Ripple's 8K server profile and tool calls loaded successfully, but peak VRAM and sustained load were not measured. Flint's 96K q8 profile is the current evaluation setting; the October 27 comparative results cover 32K f16 and 64K q8, not this profile. The other entries are earlier observations under different workloads. None is a peak guarantee. October 1 end-of-run free memory was about 5.7 GiB for Qwen f16/MTP, 3.4 GiB for Qwen q8/MTP, and 6.2 GiB for Agents-A1. October 7 Swift had about 4.4 GiB free on f16/MTP and only 1.6 GiB on q8/MTP. Projectors were loaded and Swift recognized a logo at shallow context, but image-at-full-context/video stress was not tested. Prefer f16 when 128K is enough; keep competing GPU workloads out of the 256K MTP profile, and use the plain profile or reduce microbatching if more headroom is needed.
 
 GGUFs live under `~/.lmstudio/models/` so LM Studio sees them too — both stacks coexist.
 
@@ -293,7 +294,15 @@ For comparison, LM Studio's bundled Vulkan llama.cpp measured ~9 t/s in the hist
 
 ## llama.cpp update notes
 
-Current local build: `8ca4060b7` (local binary build 3014, `0.7.0-dev`), built with IntelLLVM 2026.2.0, oneMKL 2026.2, and oneDNN 2026.1. `llama.cpp/build` points to the validated `build-sycl-20261027` directory. See the [October 27 build and profiling report](docs/benchmarks/2026-10-27/README.md).
+Current local build: `7d7f02875` (build 3279, `0.9.0-dev`), built with IntelLLVM 2026.2.0, oneMKL 2026.2, oneDNN 2026.1, SYCL, XMX ESIMD, oneDNN, FP16 kernels, and Level Zero. `llama.cpp/build` points to `build-sycl-20261108-make`; the prior build is preserved at `build-link-before-20261108`. The embedded llama.cpp web UI assets were unavailable during the restricted build, while the inference API and llama-swap dashboard work. See the [November 8 build and Ripple report](docs/benchmarks/2026-11-08/README.md).
+
+### Maintenance, paired SYCL check, and Ripple integration: 2026-11-08
+
+- Fast-forwarded clean upstream from `8ca4060b7` to `7d7f02875` (b12211). New SYCL work includes DPAS flash attention for quantized KV, vectorized dequantization stores for reordered Q4/K-quant/IQ3/MXFP4 weights, faster B70 device exchange for multi-device setups, safer refusal of device allocations larger than VRAM, and more exact quantized-copy rounding. Upstream Ripple architecture support landed in b12167.
+- On the same IntelLLVM/oneAPI/runtime stack, paired Qwen3.8-27B Q4_K_S controls were effectively flat versus build 3014: 8K prompt processing changed 1179.57 to 1182.20 t/s (+0.2%); 512-token prompt processing changed 1016.66 to 1014.15 t/s (-0.2%); 128-token decode changed 26.97 to 27.32 t/s (+1.3%). These two-repeat checks do not show a material broad throughput gain. The update is useful for Ripple compatibility, upstream correctness, and the newer SYCL kernels.
+- Added Ripple 65B Preview AD-IQ3_XXS with 8K q8 KV, 512/128 batching, and full GPU offload. It loaded at 8K on the B70 and passed a forced function-call check through llama-swap. A warm 46-token tool-call response averaged 11.6 t/s; no peak-memory sweep, long task, or batch tuning was done.
+- The live Pi model registry is synced. Invoke it with `pi --provider local-b70 --model ripple-65b-preview`; it remains a selectable model and does not replace Pi's default.
+- Detailed build flags, matched benchmark method, Ripple limitations, and rollback path are in [the full report](docs/benchmarks/2026-11-08/README.md).
 
 ### Maintenance, profiling, and Flint integration: 2026-10-27
 
@@ -455,9 +464,9 @@ The service runs as a user unit (no system root needed). Without `enable-linger`
 | Interface | URL | Availability | Purpose |
 |---|---|---|---|
 | llama-swap dashboard | `http://127.0.0.1:8080/ui/` | While `llama-swap.service` is active | Always-available Models, Activity, and Logs views |
-| Embedded llama.cpp UI | `http://127.0.0.1:9000/` | Only while a model is loaded | Chat, connection and model status, context usage, live prompt progress, generation speed, and per-message token statistics |
+| Embedded llama.cpp UI | `http://127.0.0.1:9000/` | Unavailable in the current build (UI assets could not be fetched) | Inference remains available through the OpenAI-compatible API; the llama-swap dashboard is unaffected |
 
-Opening `http://127.0.0.1:8080/` redirects to the llama-swap dashboard. The embedded llama.cpp UI is served by the transient `llama-server` child; port 9000 disappears when the model is swapped or unloaded after its 600-second idle TTL.
+Opening `http://127.0.0.1:8080/` redirects to the llama-swap dashboard. Port 9000 exposes the transient `llama-server` API and disappears when the model is swapped or unloaded after its 600-second idle TTL.
 
 Status endpoints:
 
@@ -543,6 +552,7 @@ pi --provider local-b70 --model nemotron-3.5-lightning-mtp
 pi --provider local-b70 --model muse-glimmer-30b
 pi --provider local-b70 --model gemma-4-e4b -p "one-shot prompt"
 pi --provider local-b70 --model glm-4.7-flash -p "one-shot prompt"
+pi --provider local-b70 --model ripple-65b-preview
 ```
 
 `pi config` opens a TUI for enabling/disabling extensions.
