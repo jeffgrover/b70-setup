@@ -11,9 +11,12 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import select
 import shutil
 import sys
+import termios
 import time
+import tty
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
@@ -25,6 +28,24 @@ METRIC_LINE = re.compile(
     r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{[^}]*\})?\s+([-+0-9.eE]+)(?:\s+\d+)?$"
 )
 ANSI_ESCAPE = re.compile(r"\033\[[0-9;]*m")
+
+
+def wait_for_exit(seconds: float) -> bool:
+    """Wait for the next refresh, returning True when Escape is pressed."""
+    if not sys.stdin.isatty():
+        time.sleep(seconds)
+        return False
+
+    fd = sys.stdin.fileno()
+    original_attributes = termios.tcgetattr(fd)
+    try:
+        # cbreak mode makes Escape readable immediately while retaining the
+        # terminal's normal SIGINT handling for Ctrl-C.
+        tty.setcbreak(fd)
+        ready, _, _ = select.select([sys.stdin], [], [], seconds)
+        return bool(ready and sys.stdin.read(1) == "\x1b")
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, original_attributes)
 
 
 def fetch_text(url: str, timeout: float) -> str:
@@ -127,8 +148,7 @@ class Monitor:
     server_url: str
     swap_url: str
     timeout: float = 1.5
-    previous_metrics: dict[str, float] = field(default_factory=dict)
-    previous_poll: float | None = None
+    meter_scales: dict[str, float] = field(default_factory=lambda: {"prompt": 1000.0, "generate": 100.0})
     active_turn: Turn | None = None
     last_turn: Turn | None = None
     completed_turns: deque[Turn] = field(default_factory=lambda: deque(maxlen=5))
@@ -193,7 +213,6 @@ class Monitor:
             self.active_turn.finished = self.active_turn.finished or now
             self.finish_active_turn()
 
-        interval = None if self.previous_poll is None else max(0.001, now - self.previous_poll)
         rates: dict[str, float | None] = {}
         rate_sources: dict[str, str] = {}
         slot_live_rates: dict[str, float] = {}
@@ -234,28 +253,18 @@ class Monitor:
             self.previous_slot_generated = None
             self.previous_slot_poll = None
 
-        # Use counter deltas for a responsive current rate while the server's gauges
-        # remain useful as a longer-running average.  If neither changes during a
-        # poll, retain the most recent positive rate instead of displaying 0.0.
-        for label, metric_name, gauge_name in (
-            ("prompt", "llamacpp:prompt_tokens_total", "llamacpp:prompt_tokens_seconds"),
-            ("generate", "llamacpp:tokens_predicted_total", "llamacpp:predicted_tokens_seconds"),
+        # Generation totals are committed at request completion, so their delta
+        # divided by a polling interval is a burst, not a live token rate. Use
+        # slot deltas for live rates and the server's timed gauges as fallback.
+        for label, gauge_name in (
+            ("prompt", "llamacpp:prompt_tokens_seconds"),
+            ("generate", "llamacpp:predicted_tokens_seconds"),
         ):
             gauge = metrics.get(gauge_name)
             if gauge is not None and gauge > 0:
                 rates[label] = gauge
                 rate_sources[label] = "server avg"
                 self.last_rates[label] = gauge
-
-            if interval is not None:
-                current = metrics.get(metric_name)
-                previous = self.previous_metrics.get(metric_name)
-                if current is not None and previous is not None and current >= previous:
-                    delta_rate = (current - previous) / interval
-                    if delta_rate > 0:
-                        rates[label] = delta_rate
-                        rate_sources[label] = "live"
-                        self.last_rates[label] = delta_rate
 
             if label in slot_live_rates:
                 rates[label] = slot_live_rates[label]
@@ -267,8 +276,10 @@ class Monitor:
                 if rates[label] is not None:
                     rate_sources[label] = "last known"
 
-        self.previous_metrics = metrics
-        self.previous_poll = now
+        for key, rate in rates.items():
+            if rate is not None:
+                while rate > self.meter_scales[key]:
+                    self.meter_scales[key] *= 2
 
         model = running[0] if running else {}
         model_state = model.get("state", "unloaded")
@@ -370,6 +381,16 @@ def render(monitor: Monitor, snapshot: dict[str, Any], color: bool = True) -> st
         source = rate_sources.get(key, "-")
         return kv(label, f"{fmt_rate(rates.get(key))}  [{source}]")
 
+    def meter(key: str) -> str:
+        scale = monitor.meter_scales[key]
+        suffix = f" {scale:,.0f} t/s max"
+        width = content_width - len(suffix) - 2
+        rate = rates.get(key)
+        filled = min(width, max(0, round(width * (rate or 0) / scale)))
+        bar = "=" * max(0, filled - 1) + (">" if filled else "")
+        bar += "." * (width - filled)
+        return paint("36" if key == "prompt" else "32", "[" + bar + "]") + suffix
+
     lines = [
         "╭" + "─" * (box_width - 2) + "╮",
         row(paint("1;36", "LLAMA MONITOR") + f"   {snapshot['now']}"),
@@ -382,8 +403,11 @@ def render(monitor: Monitor, snapshot: dict[str, Any], color: bool = True) -> st
         columns(kv("state", model_state), kv("requests", f"{processing} active / {deferred} deferred")),
         section("REQUEST"),
         columns(kv("activity", activity), kv("phase", phase if monitor.active_turn else "IDLE")),
-        section("THROUGHPUT  (positive rate retained when the live counter is idle)"),
-        columns(rate_line("prompt", "prompt"), rate_line("generation", "generate")),
+        section("THROUGHPUT"),
+        row(rate_line("prompt", "prompt")),
+        row(meter("prompt")),
+        row(rate_line("generation", "generate")),
+        row(meter("generate")),
         section("SERVER TOTALS  (current llama-server process)"),
         columns(kv("input", f"{fmt_int(total_input)} total"), kv("output", f"{fmt_int(output)} generated")),
         columns(kv("uncached", fmt_int(uncached_input)), kv("cached", fmt_int(cached_input))),
@@ -421,7 +445,7 @@ def render(monitor: Monitor, snapshot: dict[str, Any], color: bool = True) -> st
 
     lines.extend([
         row(""),
-        row(paint("2", "Ctrl-C to exit")),
+        row(paint("2", "Ctrl-C or Esc to exit")),
         "╰" + "─" * (box_width - 2) + "╯",
     ])
     return "\n".join(lines)
@@ -451,7 +475,8 @@ def main() -> int:
             first = False
             if args.once:
                 return 0
-            time.sleep(args.interval)
+            if wait_for_exit(args.interval):
+                return 0
     except KeyboardInterrupt:
         return 0
 
